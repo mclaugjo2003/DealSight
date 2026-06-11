@@ -4,7 +4,7 @@ Slick professional UI with Google Maps integration
 Run: streamlit run streamlit_app/app.py  (from project root)
 """
 
-import sys, os
+import sys, os, re
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import streamlit as st
@@ -17,6 +17,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 from python_core.calculations import PropertyInputs, DealAnalyzer, grade_deal, amortization_schedule
 from python_core.data_sources import RentCastClient, FREDClient
+from python_core.listings import ListingsFetcher, DEMO_LISTINGS
+
+import braintrust
+braintrust.init_logger(project="DealSight")
+braintrust.auto_instrument()
 
 # ─────────────────────────────────────────────
 # Helpers
@@ -43,418 +48,386 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-# Global CSS — refined dark editorial theme
+# Global CSS — Premium Fintech Real Estate theme
 # ─────────────────────────────────────────────
 def inject_css() -> None:
-    if "sidebar_state" not in st.session_state: st.session_state["sidebar_state"] = "expanded"
     st.markdown("""<style>
-    @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
 
-/* ── Sidebar ──────────────────────────────── */
-}
-[data-testid="stSidebar"] * { color: #c8c4bc !important; }
-[data-testid="stSidebar"] .stNumberInput input,
-[data-testid="stSidebar"] .stTextInput input,
-[data-testid="stSidebar"] .stSelectbox select {
-    background: #13131e !important;
-    border: 1px solid rgba(255,255,255,0.08) !important;
-    border-radius: 6px !important;
-    color: #e8e6e0 !important;
-    font-family: 'Geist Mono', monospace !important;
-    font-size: 13px !important;
-}
-[data-testid="stSidebar"] .stSlider [data-baseweb="slider"] div[role="slider"] {
-    background: #c8a96e !important;
-    border-color: #c8a96e !important;
-}
-[data-testid="stSidebar"] .stSlider [data-baseweb="track-background"] div {
-    background: rgba(200,169,110,0.25) !important;
-}
-[data-testid="stSidebar"] .stSlider [data-baseweb="track-foreground"] div {
-    background: #c8a96e !important;
-}
+    /* ── CSS Variables ───────────────────────── */
+    :root {
+        --bg-deep: #050511;
+        --bg-card: #0b0b1e;
+        --bg-surface: #10102a;
+        --bg-sidebar: #06060f;
+        --accent-blue: #4f72ff;
+        --accent-blue-dim: rgba(79,114,255,0.18);
+        --accent-blue-glow: rgba(79,114,255,0.28);
+        --accent-gold: #d4a843;
+        --accent-gold-dim: rgba(212,168,67,0.15);
+        --accent-purple: #8b5cf6;
+        --text-primary: #e8e6f4;
+        --text-sec: rgba(205,200,230,0.58);
+        --text-muted: rgba(205,200,230,0.3);
+        --green: #34d399;
+        --red: #f87171;
+        --border: rgba(255,255,255,0.07);
+    }
 
-/* ── Main area ────────────────────────────── */
-.main-wrapper {
-    padding: 0;
-    background: #0a0a0f;
-    min-height: 100vh;
-}
+    /* ── Hide default Streamlit chrome ───────── */
+    #MainMenu, footer, header { visibility: hidden; }
+    .block-container { padding: 0 !important; max-width: 100% !important; }
+    section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
 
-/* ── Top bar ──────────────────────────────── */
-.topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 36px;
-    background: #0d0d14;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    position: sticky; top: 0; z-index: 100;
-}
-.topbar-logo {
-    font-family: 'Instrument Serif', serif;
-    font-size: 1.45rem;
-    color: #e8e6e0;
-    letter-spacing: -0.01em;
-    display: flex; align-items: center; gap: 10px;
-}
-.topbar-logo .dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #c8a96e;
-    box-shadow: 0 0 12px rgba(200,169,110,0.5);
-}
-.topbar-address {
-    font-family: 'Geist Mono', monospace;
-    font-size: 11px;
-    color: rgba(200,190,170,0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-}
-.topbar-status {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 12px; color: rgba(200,190,170,0.5);
-    font-family: 'Geist Mono', monospace;
-}
-.status-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: #4ade80;
-    box-shadow: 0 0 8px rgba(74,222,128,0.5);
-    animation: pulse-green 2s infinite;
-}
-@keyframes pulse-green { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    /* ── App background with subtle gradient mesh ── */
+    .stApp { background: var(--bg-deep) !important; }
 
-/* ── Search bar ───────────────────────────── */
-.search-container {
-    background: linear-gradient(160deg, #0f0f1a 0%, #12121f 100%);
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-    padding: 24px 36px;
-}
-.search-label {
-    font-family: 'Instrument Serif', serif;
-    font-size: 1.8rem;
-    color: #e8e6e0;
-    margin-bottom: 16px;
-    letter-spacing: -0.02em;
-}
-.search-label em { color: #c8a96e; font-style: italic; }
-.search-sub {
-    font-size: 12px; color: rgba(200,190,170,0.4);
-    font-family: 'Geist Mono', monospace;
-    text-transform: uppercase; letter-spacing: 0.08em;
-    margin-bottom: 14px;
-}
-[data-testid="stTextInput"] input {
-    background: #13131e !important;
-    border: 1px solid rgba(200,169,110,0.3) !important;
-    border-radius: 8px !important;
-    color: #e8e6e0 !important;
-    font-family: 'Geist', sans-serif !important;
-    font-size: 15px !important;
-    padding: 14px 18px !important;
-    box-shadow: 0 0 0 0 rgba(200,169,110,0) !important;
-    transition: border-color .2s, box-shadow .2s !important;
-}
-[data-testid="stTextInput"] input:focus {
-    border-color: rgba(200,169,110,0.7) !important;
-    box-shadow: 0 0 0 3px rgba(200,169,110,0.1) !important;
-}
+    /* ── Sidebar ─────────────────────────────── */
+    [data-testid="stSidebar"] {
+        background: var(--bg-sidebar) !important;
+        border-right: 1px solid var(--border) !important;
+    }
+    [data-testid="stSidebar"] * { color: var(--text-sec) !important; }
+    [data-testid="stSidebar"] .stNumberInput input,
+    [data-testid="stSidebar"] .stTextInput input,
+    [data-testid="stSidebar"] .stSelectbox select {
+        background: rgba(255,255,255,0.04) !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 8px !important;
+        color: var(--text-primary) !important;
+        font-family: 'Space Mono', monospace !important;
+        font-size: 13px !important;
+    }
+    [data-testid="stSidebar"] .stNumberInput input:focus,
+    [data-testid="stSidebar"] .stTextInput input:focus {
+        border-color: var(--accent-blue) !important;
+        box-shadow: 0 0 0 2px var(--accent-blue-dim) !important;
+    }
+    [data-testid="stSidebar"] .stSlider [data-baseweb="slider"] div[role="slider"] {
+        background: var(--accent-blue) !important;
+        border-color: var(--accent-blue) !important;
+    }
+    [data-testid="stSidebar"] .stSlider [data-baseweb="track-background"] div {
+        background: rgba(79,114,255,0.15) !important;
+    }
+    [data-testid="stSidebar"] .stSlider [data-baseweb="track-foreground"] div {
+        background: var(--accent-blue) !important;
+    }
 
-/* ── Map + Property detail row ───────────── */
-.map-container {
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid rgba(255,255,255,0.07);
-    height: 340px;
-    position: relative;
-}
-.map-badge {
-    position: absolute; top: 12px; left: 12px; z-index: 10;
-    background: rgba(13,13,20,0.85);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(200,169,110,0.25);
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 10px; font-family: 'Geist Mono', monospace;
-    color: #c8a96e; text-transform: uppercase; letter-spacing: 0.1em;
-}
+    /* ── Main area ───────────────────────────── */
+    .main-wrapper { padding: 0; min-height: 100vh; }
 
-/* ── KPI cards ────────────────────────────── */
-.kpi-strip {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 1px;
-    background: rgba(255,255,255,0.04);
-    border-top: 1px solid rgba(255,255,255,0.04);
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    /* ── Top bar ─────────────────────────────── */
+    .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 36px;
+        height: 62px;
+        background: rgba(5,5,17,0.95);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        position: sticky; top: 0; z-index: 100;
+        position: relative;
 }
-.kpi-card {
-    background: #0d0d14;
-    padding: 22px 20px;
-    position: relative;
-    cursor: default;
-    transition: background .2s;
-}
-.kpi-card:hover { background: #111120; }
-.kpi-card::before {
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0;
-    height: 2px;
-    background: transparent;
-    transition: background .2s;
-}
-.kpi-card:hover::before { background: #c8a96e; }
-.kpi-label {
-    font-size: 9px; font-family: 'Geist Mono', monospace;
-    color: rgba(200,190,170,0.4);
-    text-transform: uppercase; letter-spacing: 0.14em;
-    margin-bottom: 10px;
-}
-.kpi-value {
-    font-family: 'Geist Mono', monospace;
-    font-size: 1.75rem; font-weight: 500;
-    line-height: 1;
-    margin-bottom: 6px;
-}
-.kpi-grade {
-    display: inline-flex; align-items: center;
-    gap: 5px; font-size: 10px;
-    font-family: 'Geist Mono', monospace;
-    padding: 2px 7px; border-radius: 3px;
-}
-.kpi-sub {
-    font-size: 10px;
-    color: rgba(200,190,170,0.35);
-    font-family: 'Geist Mono', monospace;
-    margin-top: 4px;
-}
-.grade-A { color: #4ade80; }
-.grade-B { color: #a3e635; }
-.grade-C { color: #facc15; }
-.grade-F { color: #f87171; }
-.grade-bg-A { background: rgba(74,222,128,0.1);  color: #4ade80;  }
-.grade-bg-B { background: rgba(163,230,53,0.1);  color: #a3e635;  }
-.grade-bg-C { background: rgba(250,204,21,0.1);  color: #facc15;  }
-.grade-bg-F { background: rgba(248,113,113,0.1); color: #f87171;  }
-.cf-pos { color: #4ade80; }
-.cf-neg { color: #f87171; }
-.cf-neu { color: #c8a96e; }
+    /* Gradient accent line at bottom of topbar */
+    .topbar::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 0; right: 0; height: 1px;
+        background: linear-gradient(90deg, transparent 0%, rgba(79,114,255,0.6) 30%, rgba(212,168,67,0.5) 70%, transparent 100%);
+    }
+    .topbar-logo {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.25rem; font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, #ffffff 0%, var(--accent-gold) 120%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .topbar-logo .logo-box {
+        width: 30px; height: 30px;
+        background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+        border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 15px;
+        box-shadow: 0 0 18px rgba(79,114,255,0.4);
+        -webkit-text-fill-color: initial;
+        color: white; flex-shrink: 0;
+    }
+    .topbar-address {
+        font-family: 'Space Mono', monospace;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        padding: 6px 16px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1); border-radius: 100px;
+        max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        transition: border-color .2s;
+    }
+    .topbar-status {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 11px; color: var(--text-muted);
+        font-family: 'Space Mono', monospace;
+    }
+    .status-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 10px rgba(52,211,153,0.6);
+        animation: pulse-green 2s infinite;
+    }
+    @keyframes pulse-green {
+        0%,100% { opacity:1; box-shadow: 0 0 10px rgba(52,211,153,0.6); }
+        50%      { opacity:0.55; box-shadow: 0 0 4px rgba(52,211,153,0.2); }
+    }
 
-/* ── Section headers ──────────────────────── */
-.section-title {
-    font-family: 'Instrument Serif', serif;
-    font-size: 1.1rem;
-    color: #e8e6e0;
-    padding: 20px 0 12px;
-    display: flex; align-items: center; gap: 10px;
-    letter-spacing: -0.01em;
-}
-.section-title::after {
-    content: '';
-    flex: 1; height: 1px;
-    background: rgba(255,255,255,0.06);
-}
+    /* ── Section headers ─────────────────────── */
+    .section-title {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.75rem; font-weight: 600;
+        color: var(--text-primary);
+        padding: 20px 0 12px;
+        display: flex; align-items: center; gap: 10px;
+        text-transform: uppercase; letter-spacing: 0.1em;
+    }
+    .section-title::after {
+        content: ''; flex: 1; height: 1px;
+        background: linear-gradient(90deg, rgba(255,255,255,0.08), transparent);
+    }
 
-/* ── Property detail pills ────────────────── */
-.detail-grid {
-    display: grid; grid-template-columns: repeat(3,1fr); gap: 8px;
-    margin-bottom: 16px;
-}
-.detail-pill {
-    background: #13131e;
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 8px;
-    padding: 12px 14px;
-}
-.detail-pill .dp-label {
-    font-size: 9px; font-family: 'Geist Mono', monospace;
-    color: rgba(200,190,170,0.4);
-    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px;
-}
-.detail-pill .dp-value {
-    font-family: 'Geist Mono', monospace;
-    font-size: 13px; font-weight: 500; color: #e8e6e0;
-}
+    /* ── Property detail pills ───────────────── */
+    .detail-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 16px; }
+    .detail-pill {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+        transition: border-color .2s, background .2s;
+    }
+    .detail-pill:hover { background: rgba(79,114,255,0.05); border-color: rgba(79,114,255,0.2); }
+    .detail-pill .dp-label {
+        font-size: 9px; font-family: 'Space Mono', monospace;
+        color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px;
+    }
+    .detail-pill .dp-value { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-primary); }
 
-/* ── Expense row items ────────────────────── */
-.expense-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 9px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    font-size: 13px;
-}
-.expense-row:last-child { border-bottom: none; }
-.expense-row .er-label { color: rgba(200,190,170,0.55); font-family: 'Geist', sans-serif; }
-.expense-row .er-value {
-    font-family: 'Geist Mono', monospace;
-    color: #f87171; font-size: 12.5px;
-}
-.expense-row .er-value.positive { color: #4ade80; }
-.expense-row .er-value.gold { color: #c8a96e; }
-.expense-row .er-value.neutral { color: #e8e6e0; }
+    /* ── Expense rows ────────────────────────── */
+    .expense-row {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px;
+    }
+    .expense-row:last-child { border-bottom: none; }
+    .expense-row .er-label { color: var(--text-sec); font-family: 'Plus Jakarta Sans', sans-serif; }
+    .expense-row .er-value { font-family: 'Space Mono', monospace; color: var(--red); font-size: 12.5px; }
+    .expense-row .er-value.positive { color: var(--green); }
+    .expense-row .er-value.gold     { color: var(--accent-gold); }
+    .expense-row .er-value.neutral  { color: var(--text-primary); }
 
-/* ── Summary stat rows ────────────────────── */
-.stat-row {
-    display: flex; justify-content: space-between;
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    font-size: 13px;
-}
-.stat-row .sr-label { color: rgba(200,190,170,0.5); }
-.stat-row .sr-value {
-    font-family: 'Geist Mono', monospace;
-    font-size: 12.5px; color: #e8e6e0;
-}
+    /* ── Stat rows ───────────────────────────── */
+    .stat-row {
+        display: flex; justify-content: space-between;
+        padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px;
+    }
+    .stat-row .sr-label { color: var(--text-sec); font-family: 'Plus Jakarta Sans', sans-serif; }
+    .stat-row .sr-value { font-family: 'Space Mono', monospace; font-size: 12.5px; color: var(--text-primary); }
 
-/* ── Tabs ─────────────────────────────────── */
-.stTabs [data-baseweb="tab-list"] {
-    background: transparent !important;
-    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
-    gap: 0 !important;
-    padding: 0 36px !important;
-}
-.stTabs [data-baseweb="tab"] {
-    background: transparent !important;
-    border: none !important;
-    border-bottom: 2px solid transparent !important;
-    color: rgba(200,190,170,0.4) !important;
-    font-family: 'Geist Mono', monospace !important;
-    font-size: 11px !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.1em !important;
-    padding: 14px 20px !important;
-    margin-bottom: -1px !important;
-    transition: all .2s !important;
-}
-.stTabs [aria-selected="true"] {
-    color: #c8a96e !important;
-    border-bottom-color: #c8a96e !important;
-    background: transparent !important;
-}
-.stTabs [data-baseweb="tab-panel"] {
-    padding: 28px 36px !important;
-    background: transparent !important;
-}
+    /* ── Tabs ────────────────────────────────── */
+    .stTabs [data-baseweb="tab-list"] {
+        background: transparent !important;
+        border-bottom: 1px solid var(--border) !important;
+        gap: 4px !important; padding: 0 36px !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background: transparent !important;
+        border: none !important;
+        color: var(--text-sec) !important;
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 12px !important; font-weight: 500 !important;
+        text-transform: uppercase !important; letter-spacing: 0.06em !important;
+        padding: 12px 18px !important;
+        transition: all .2s !important;
+        border-bottom: 2px solid transparent !important;
+        margin-bottom: -1px !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: var(--text-primary) !important;
+        background: rgba(79,114,255,0.05) !important;
+    }
+    .stTabs [aria-selected="true"] {
+        color: var(--accent-blue) !important;
+        border-bottom-color: var(--accent-blue) !important;
+        background: transparent !important;
+    }
+    .stTabs [data-baseweb="tab-panel"] { padding: 28px 36px !important; background: transparent !important; }
 
-/* ── Buttons ──────────────────────────────── */
-.stButton > button {
-    background: #c8a96e !important;
-    color: #0a0a0f !important;
-    border: none !important;
-    border-radius: 6px !important;
-    font-family: 'Geist', sans-serif !important;
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    padding: 10px 24px !important;
-    transition: opacity .2s, transform .15s !important;
-    letter-spacing: 0.01em !important;
-}
-.stButton > button:hover { opacity: 0.88 !important; transform: translateY(-1px) !important; }
+    /* ── Buttons ─────────────────────────────── */
+    .stButton > button {
+        background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%) !important;
+        color: #ffffff !important; border: none !important; border-radius: 8px !important;
+        font-family: 'Space Grotesk', sans-serif !important; font-weight: 600 !important;
+        font-size: 13px !important; padding: 10px 24px !important;
+        transition: all .2s !important; letter-spacing: 0.02em !important;
+        box-shadow: 0 4px 18px rgba(79,114,255,0.32) !important;
+    }
+    .stButton > button:hover { transform: translateY(-1px) !important; box-shadow: 0 6px 24px rgba(79,114,255,0.48) !important; }
+    .stButton > button:active { transform: translateY(0) !important; }
 
-/* ── Plotly charts ────────────────────────── */
-.js-plotly-plot .plotly .modebar { display: none !important; }
+    /* ── Sidebar section labels ──────────────── */
+    .sidebar-section {
+        font-size: 9px; font-family: 'Space Mono', monospace;
+        text-transform: uppercase; letter-spacing: 0.14em;
+        color: rgba(79,114,255,0.65);
+        padding: 16px 0 6px;
+        border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px;
+    }
+    .sidebar-section:first-child { border-top: none; margin-top: 0; }
 
-/* ── Sidebar section headers ──────────────── */
-.sidebar-section {
-    font-size: 9px;
-    font-family: 'Geist Mono', monospace;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: rgba(200,169,110,0.6);
-    padding: 16px 0 6px;
-    border-top: 1px solid rgba(255,255,255,0.05);
-    margin-top: 8px;
-}
-.sidebar-section:first-child { border-top: none; margin-top: 0; }
+    /* ── BRRRR steps ─────────────────────────── */
+    .brrrr-step {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 11px 14px; background: rgba(255,255,255,0.02);
+        border-radius: 8px; margin-bottom: 6px;
+        border-left: 3px solid rgba(255,255,255,0.07);
+        transition: background .15s;
+    }
+    .brrrr-step:hover { background: rgba(255,255,255,0.04); }
+    .brrrr-step.highlight { border-left-color: var(--accent-gold); background: var(--accent-gold-dim); }
+    .brrrr-step.positive  { border-left-color: var(--green); background: rgba(52,211,153,0.04); }
+    .brrrr-step.negative  { border-left-color: var(--red); background: rgba(248,113,113,0.04); }
+    .brrrr-step .bs-label { font-size: 12.5px; color: var(--text-sec); font-family: 'Plus Jakarta Sans', sans-serif; }
+    .brrrr-step .bs-val   { font-family: 'Space Mono', monospace; font-size: 13px; color: var(--text-primary); }
 
-/* ── BRRRR flow steps ─────────────────────── */
-.brrrr-step {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 11px 14px;
-    background: #11111c;
-    border-radius: 8px; margin-bottom: 6px;
-    border-left: 3px solid rgba(255,255,255,0.07);
-}
-.brrrr-step.highlight { border-left-color: #c8a96e; background: rgba(200,169,110,0.06); }
-.brrrr-step.positive  { border-left-color: #4ade80; background: rgba(74,222,128,0.05); }
-.brrrr-step.negative  { border-left-color: #f87171; background: rgba(248,113,113,0.05); }
-.brrrr-step .bs-label { font-size: 12.5px; color: rgba(200,190,170,0.6); }
-.brrrr-step .bs-val {
-    font-family: 'Geist Mono', monospace;
-    font-size: 13px; color: #e8e6e0;
-}
+    /* ── Comps table ─────────────────────────── */
+    .comp-row {
+        display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+        padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+        font-size: 12.5px; transition: background .15s;
+    }
+    .comp-row:hover { background: rgba(79,114,255,0.04); }
+    .comp-row.comp-header {
+        font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase;
+        letter-spacing: 0.1em; color: var(--text-muted);
+        border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 2px;
+    }
+    .comp-row .cr-addr { color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .comp-row .cr-rent { font-family: 'Space Mono', monospace; color: var(--green); font-weight: 500; }
+    .comp-row .cr-stat { font-family: 'Space Mono', monospace; color: var(--text-muted); }
 
-/* ── Comps table ──────────────────────────── */
-.comp-row {
-    display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-    padding: 10px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    font-size: 12.5px;
-    transition: background .15s;
-}
-.comp-row:hover { background: rgba(255,255,255,0.02); }
-.comp-row.comp-header {
-    font-family: 'Geist Mono', monospace;
-    font-size: 9px; text-transform: uppercase;
-    letter-spacing: 0.1em; color: rgba(200,190,170,0.35);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding-bottom: 8px; margin-bottom: 2px;
-}
-.comp-row .cr-addr { color: rgba(200,190,170,0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.comp-row .cr-rent { font-family: 'Geist Mono', monospace; color: #4ade80; font-weight: 500; }
-.comp-row .cr-stat { font-family: 'Geist Mono', monospace; color: rgba(200,190,170,0.55); }
+    /* ── Macro ticker ────────────────────────── */
+    .macro-ticker {
+        display: flex; background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+    }
+    .macro-item {
+        flex: 1; padding: 18px 14px;
+        border-right: 1px solid rgba(255,255,255,0.05); text-align: center;
+        transition: background .15s;
+    }
+    .macro-item:hover { background: rgba(79,114,255,0.04); }
+    .macro-item:last-child { border-right: none; }
+    .macro-item .mi-label {
+        font-size: 9px; font-family: 'Space Mono', monospace; color: var(--text-muted);
+        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;
+    }
+    .macro-item .mi-val { font-family: 'Space Mono', monospace; font-size: 1.15rem; font-weight: 400; color: var(--text-primary); }
+    .macro-item .mi-val.up   { color: var(--green); }
+    .macro-item .mi-val.warn { color: #fb923c; }
 
-/* ── Macroeconomic ticker ─────────────────── */
-.macro-ticker {
-    display: flex; gap: 0;
-    background: #0d0d14;
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 10px; overflow: hidden;
-}
-.macro-item {
-    flex: 1; padding: 16px 18px;
-    border-right: 1px solid rgba(255,255,255,0.05);
-    text-align: center;
-}
-.macro-item:last-child { border-right: none; }
-.macro-item .mi-label {
-    font-size: 9px; font-family: 'Geist Mono', monospace;
-    color: rgba(200,190,170,0.35);
-    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;
-}
-.macro-item .mi-val {
-    font-family: 'Geist Mono', monospace;
-    font-size: 1.2rem; font-weight: 500; color: #e8e6e0;
-}
-.macro-item .mi-val.up { color: #4ade80; }
-.macro-item .mi-val.warn { color: #facc15; }
+    /* ── Banners ─────────────────────────────── */
+    .info-banner {
+        background: rgba(79,114,255,0.06);
+        border: 1px solid rgba(79,114,255,0.2); border-radius: 10px; padding: 14px 18px;
+        font-size: 13px; color: rgba(180,190,255,0.8); margin: 12px 0;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .success-banner {
+        background: rgba(52,211,153,0.06);
+        border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; padding: 14px 18px;
+        font-size: 13px; color: rgba(52,211,153,0.85); margin: 12px 0;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
 
-/* ── Info / warning banners ───────────────── */
-.info-banner {
-    background: rgba(200,169,110,0.06);
-    border: 1px solid rgba(200,169,110,0.15);
-    border-radius: 8px; padding: 12px 16px;
-    font-size: 12.5px; color: rgba(200,190,170,0.7);
-    margin: 12px 0;
-}
-.success-banner {
-    background: rgba(74,222,128,0.06);
-    border: 1px solid rgba(74,222,128,0.15);
-    border-radius: 8px; padding: 12px 16px;
-    font-size: 12.5px; color: rgba(74,222,128,0.8);
-    margin: 12px 0;
-}
+    /* ── Scrollbar ───────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(79,114,255,0.25); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(79,114,255,0.45); }
 
-/* ── Scrollbar ────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(200,169,110,0.2); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(200,169,110,0.4); }
+    /* ── Plotly charts ───────────────────────── */
+    .js-plotly-plot .plotly .modebar { display: none !important; }
+    .stPlotlyChart { border-radius: 12px; overflow: hidden; }
 
-/* ── Plotly dark override ─────────────────── */
-.stPlotlyChart { border-radius: 10px; overflow: hidden; }
-    /* ── Plotly dark override ─────────────────── */
-    .stPlotlyChart { border-radius: 10px; overflow: hidden; }
+    /* ── Grade colors ────────────────────────── */
+    .cf-pos { color: var(--green); }
+    .cf-neg { color: var(--red); }
+    .cf-neu { color: var(--accent-gold); }
+    .grade-A { color: var(--green); }
+    .grade-B { color: #a3e635; }
+    .grade-C { color: #fbbf24; }
+    .grade-F { color: var(--red); }
+    .grade-bg-A { background: rgba(52,211,153,0.1);  color: var(--green); }
+    .grade-bg-B { background: rgba(163,230,53,0.1);  color: #a3e635; }
+    .grade-bg-C { background: rgba(251,191,36,0.1);  color: #fbbf24; }
+    .grade-bg-F { background: rgba(248,113,113,0.1); color: var(--red); }
+
+    /* ── Listing cards ───────────────────────── */
+    .listing-card {
+        background: var(--bg-card); border: 1px solid var(--border);
+        border-radius: 14px; overflow: hidden;
+        transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; height: 100%;
+    }
+    .listing-card:hover {
+        border-color: rgba(79,114,255,0.35); transform: translateY(-3px);
+        box-shadow: 0 8px 32px rgba(79,114,255,0.12);
+    }
+    .listing-card img { width: 100%; height: 200px; object-fit: cover; display: block; background: var(--bg-surface); }
+    /* ── Photo carousel reel ── */
+    .photo-reel-wrap { position: relative; border-radius: 14px 14px 0 0; overflow: hidden; }
+    .photo-reel {
+        display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+        scrollbar-width: none; height: 200px;
+    }
+    .photo-reel::-webkit-scrollbar { display: none; }
+    .photo-reel img {
+        min-width: 100%; height: 200px; object-fit: cover;
+        scroll-snap-align: start; flex-shrink: 0;
+        background: var(--bg-surface);
+    }
+    .photo-count-badge {
+        position: absolute; bottom: 8px; right: 8px;
+        background: rgba(0,0,0,0.60); backdrop-filter: blur(4px);
+        color: rgba(255,255,255,0.82); font-size: 9.5px;
+        font-family: 'Space Mono', monospace;
+        padding: 2px 8px; border-radius: 100px; pointer-events: none;
+    }
+    .sale-price-badge {
+        color: var(--accent-gold) !important;
+    }
+    .listing-card-body { padding: 14px 16px 16px; }
+    .listing-card-rent {
+        font-family: 'Space Mono', monospace; font-size: 1.25rem; font-weight: 700;
+        color: var(--accent-blue); margin-bottom: 4px;
+    }
+    .listing-card-addr {
+        font-size: 12.5px; color: var(--text-sec); margin-bottom: 10px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .listing-card-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .listing-badge {
+        background: var(--accent-blue-dim); border: 1px solid rgba(79,114,255,0.18);
+        border-radius: 100px; padding: 3px 10px;
+        font-family: 'Space Mono', monospace; font-size: 10px; color: rgba(160,170,255,0.75);
+    }
+    .listing-card-meta { font-size: 10.5px; color: var(--text-muted); font-family: 'Space Mono', monospace; }
+    .listing-card-type {
+        display: inline-block; background: var(--accent-gold-dim);
+        border: 1px solid rgba(212,168,67,0.22); border-radius: 100px;
+        padding: 2px 9px; font-size: 9.5px; color: rgba(212,168,67,0.8);
+        text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;
+        font-family: 'Space Mono', monospace;
+    }
     </style>
     """, unsafe_allow_html=True)
 inject_css()
@@ -471,8 +444,8 @@ def apply_theme(fig: go.Figure, height: int = 380, **kwargs) -> go.Figure:
 
     layout: dict = {
         "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor":  "#0d0d14",
-        "font":          dict(family="Geist Mono, monospace", color="rgba(200,190,170,0.6)", size=11),
+        "plot_bgcolor":  "#0b0b1e",
+        "font":          dict(family="Space Mono, monospace", color="rgba(205,200,230,0.5)", size=11),
         "legend":        dict(orientation="h", y=1.08, font=dict(size=10)),
         "margin":        dict(t=40, b=40, l=12, r=12),
         "height":        height,
@@ -480,15 +453,27 @@ def apply_theme(fig: go.Figure, height: int = 380, **kwargs) -> go.Figure:
         "yaxis":         axis_defaults,
     }
 
-    # Caller overrides win — merge over the defaults
     layout.update(kwargs)
-
-    # ignore: fig.update_layout(**layout)  # ignore
     return fig
-GOLD  = "#c8a96e"
-GREEN = "#4ade80"
-RED   = "#f87171"
-BLUE  = "#60a5fa"
+GOLD   = "#d4a843"
+GREEN  = "#34d399"
+RED    = "#f87171"
+BLUE   = "#4f72ff"
+PURPLE = "#8b5cf6"
+# ─────────────────────────────────────────────
+# Session-state defaults (address search writes here)
+# ─────────────────────────────────────────────
+st.session_state.setdefault("sb_address",  "123 Main St")
+st.session_state.setdefault("sb_city_st",  "Phoenix, AZ")
+st.session_state.setdefault("sb_zip_code", "85001")
+
+# Apply pending address updates before widgets are instantiated
+for _wk, _pk in [("sb_address", "_pending_sb_address"),
+                 ("sb_city_st", "_pending_sb_city_st"),
+                 ("sb_zip_code", "_pending_sb_zip_code")]:
+    if _pk in st.session_state:
+        st.session_state[_wk] = st.session_state.pop(_pk)
+
 # ─────────────────────────────────────────────
 # Sidebar — Inputs
 # ─────────────────────────────────────────────
@@ -496,19 +481,22 @@ with st.sidebar:
     st.markdown("""
     <div style="padding:20px 0 16px;display:flex;align-items:center;gap:10px;
          border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:8px">
-        <div style="width:8px;height:8px;border-radius:50%;background:#c8a96e;
-             box-shadow:0 0 12px rgba(200,169,110,0.5)"></div>
-        <span style="font-family:'Geist Mono',monospace;font-size:11px;
-              text-transform:uppercase;letter-spacing:0.14em;color:#c8a96e">DealSight</span>
+        <div style="width:28px;height:28px;border-radius:7px;flex-shrink:0;
+             background:linear-gradient(135deg,#4f72ff 0%,#8b5cf6 100%);
+             display:flex;align-items:center;justify-content:center;font-size:14px;
+             box-shadow:0 0 14px rgba(79,114,255,0.4)">🏠</div>
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;
+              letter-spacing:-0.01em;
+              background:linear-gradient(135deg,#ffffff,#d4a843);
+              -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+              background-clip:text">DealSight</span>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-section">Property</div>', unsafe_allow_html=True)
-    address: str = st.text_input("Street Address", "123 Main St", label_visibility="collapsed", placeholder="Street address")
-    city_st: str = st.text_input("City, State",    "Phoenix, AZ",  label_visibility="collapsed",
-                              placeholder="City, State")
-    zip_code: str = st.text_input("ZIP",            "85001",        label_visibility="collapsed",
-                              placeholder="ZIP code")
+    address: str  = st.text_input("Street Address", key="sb_address",  label_visibility="collapsed", placeholder="Street address")
+    city_st: str  = st.text_input("City, State",    key="sb_city_st",  label_visibility="collapsed", placeholder="City, State")
+    zip_code: str = st.text_input("ZIP",             key="sb_zip_code", label_visibility="collapsed", placeholder="ZIP code")
 
     st.markdown('<div class="sidebar-section">Purchase</div>', unsafe_allow_html=True)
     purchase_price: int = st.number_input("Purchase Price",  value=350_000, step=5_000, format="%d", label_visibility="collapsed")
@@ -609,10 +597,13 @@ cf_color = "cf-pos" if metrics.monthly_cash_flow > 0 else ("cf-neg" if metrics.m
 st.markdown(f"""
 <div class="topbar">
     <div class="topbar-logo">
-        <div class="dot"></div>
+        <div class="logo-box" style="width:38px;height:38px;font-size:18px;border-radius:10px;">🏠</div>
         DealSight
     </div>
-    <div class="topbar-address">{full_address if address != "123 Main St" else "Enter an address →"}</div>
+    <div class="topbar-address" style="color:{'#e8e6f4' if address != '123 Main St' else 'rgba(180,185,255,0.55)'};
+         {'font-weight:500;' if address != '123 Main St' else ''}">
+        {'🔍 ' if address == '123 Main St' else ''}{full_address if address != "123 Main St" else "Enter an address below →"}
+    </div>
     <div class="topbar-status">
         <div class="status-dot"></div>
         Analysis ready
@@ -621,12 +612,43 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
+# Address Search Strip
+# ─────────────────────────────────────────────
+st.markdown("""
+<div style="padding:16px 36px 0;background:linear-gradient(180deg,rgba(11,10,30,0.6) 0%,transparent 100%);">
+</div>""", unsafe_allow_html=True)
+
+_srch_c, _srch_btn_c = st.columns([7, 1], gap="small")
+with _srch_c:
+    _search_query = st.text_input(
+        "address_search",
+        placeholder="🔍  Search any property address  —  e.g. 4521 N Central Ave, Phoenix, AZ 85012",
+        label_visibility="collapsed",
+        key="addr_search_box",
+    )
+with _srch_btn_c:
+    _search_go = st.button("Analyze →", key="btn_addr_search", use_container_width=True)
+
+if _search_go and _search_query.strip():
+    _txt = _search_query.strip()
+    _zip_m = re.search(r'\b(\d{5})(?:-\d{4})?\s*$', _txt)
+    _pzip  = _zip_m.group(1) if _zip_m else ""
+    _no_zip = _txt[:_zip_m.start()].strip(", ") if _zip_m else _txt
+    _parts  = _no_zip.rsplit(",", 1)
+    _paddr  = _parts[0].strip()
+    _pcity  = _parts[1].strip() if len(_parts) == 2 else ""
+    st.session_state["_pending_sb_address"]  = _paddr
+    st.session_state["_pending_sb_city_st"]  = _pcity
+    st.session_state["_pending_sb_zip_code"] = _pzip
+    st.rerun()
+
+# ─────────────────────────────────────────────
 # Map + Property Info Row
 # ─────────────────────────────────────────────
 maps_key = get_secret("GOOGLE_MAPS_API_KEY")
 encoded_address = urllib.parse.quote(full_address)
 
-st.markdown('<div style="padding: 24px 36px 0;">', unsafe_allow_html=True)
+st.markdown('<div style="padding: 16px 36px 0;">', unsafe_allow_html=True)
 
 map_col, info_col = st.columns([3, 2], gap="large")
 
@@ -639,10 +661,10 @@ with map_col:
         <div style="position:relative;border-radius:12px;overflow:hidden;
              border:1px solid rgba(255,255,255,0.07);height:340px;">
             <div style="position:absolute;top:12px;left:12px;z-index:10;
-                 background:rgba(13,13,20,0.85);backdrop-filter:blur(8px);
-                 border:1px solid rgba(200,169,110,0.25);border-radius:6px;
+                 background:rgba(5,5,17,0.88);backdrop-filter:blur(10px);
+                 border:1px solid rgba(79,114,255,0.3);border-radius:6px;
                  padding:5px 10px;font-size:10px;font-family:monospace;
-                 color:#c8a96e;text-transform:uppercase;letter-spacing:0.1em;">
+                 color:#d4a843;text-transform:uppercase;letter-spacing:0.1em;">
                 Google Maps
             </div>
             <iframe
@@ -675,10 +697,10 @@ with map_col:
         <div style="position:relative;border-radius:12px;overflow:hidden;
              border:1px solid rgba(255,255,255,0.07);height:340px;">
             <div style="position:absolute;top:12px;left:12px;z-index:10;
-                 background:rgba(13,13,20,0.85);backdrop-filter:blur(8px);
-                 border:1px solid rgba(200,169,110,0.25);border-radius:6px;
+                 background:rgba(5,5,17,0.88);backdrop-filter:blur(10px);
+                 border:1px solid rgba(79,114,255,0.3);border-radius:6px;
                  padding:5px 10px;font-size:10px;font-family:monospace;
-                 color:#c8a96e;text-transform:uppercase;letter-spacing:0.1em;">
+                 color:#d4a843;text-transform:uppercase;letter-spacing:0.1em;">
                 OpenStreetMap · Add GOOGLE_MAPS_API_KEY for Google Maps
             </div>
             <iframe
@@ -690,7 +712,7 @@ with map_col:
                 src="https://maps.google.com/maps?q={encoded_address}&t=&z=15&ie=UTF8&iwloc=&output=embed">
             </iframe>
         </div>
-        <div style="font-size:10px;color:rgba(200,190,170,0.3);padding:6px 0;
+        <div style="font-size:10px;color:rgba(205,200,230,0.28);padding:6px 0;
              font-family:monospace;text-align:center;">
             Add GOOGLE_MAPS_API_KEY to secrets.toml for Google Maps + Street View
         </div>
@@ -700,10 +722,10 @@ with map_col:
         osm_clean = f"""
         <div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);height:340px;position:relative;">
             <div style="position:absolute;top:12px;left:12px;z-index:10;
-                 background:rgba(13,13,20,0.9);backdrop-filter:blur(8px);
-                 border:1px solid rgba(200,169,110,0.25);border-radius:6px;
+                 background:rgba(5,5,17,0.92);backdrop-filter:blur(10px);
+                 border:1px solid rgba(79,114,255,0.3);border-radius:6px;
                  padding:5px 10px;font-size:10px;font-family:monospace;
-                 color:#c8a96e;text-transform:uppercase;letter-spacing:0.1em;">
+                 color:#d4a843;text-transform:uppercase;letter-spacing:0.1em;">
                 Map Preview
             </div>
             <iframe
@@ -714,7 +736,7 @@ with map_col:
             </iframe>
         </div>
         <div style="text-align:center;padding:6px 0;font-size:10px;
-             color:rgba(200,190,170,0.25);font-family:monospace;">
+             color:rgba(205,200,230,0.25);font-family:monospace;">
             Add GOOGLE_MAPS_API_KEY to secrets.toml for the full Google Maps + Street View experience
         </div>
         """
@@ -795,29 +817,31 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 def kpi_card(label: str, value: str, grade: str, desc: str, sub: str = "") -> str:
     grade_colors = {
-        "A": ("#4ade80", "rgba(74,222,128,0.1)"),
-        "B": ("#a3e635", "rgba(163,230,53,0.1)"),
-        "C": ("#facc15", "rgba(250,204,21,0.1)"),
-        "F": ("#f87171", "rgba(248,113,113,0.1)"),
+        "A": ("#34d399", "rgba(52,211,153,0.1)",  "rgba(52,211,153,0.3)"),
+        "B": ("#a3e635", "rgba(163,230,53,0.1)",  "rgba(163,230,53,0.3)"),
+        "C": ("#fbbf24", "rgba(251,191,36,0.1)",  "rgba(251,191,36,0.3)"),
+        "F": ("#f87171", "rgba(248,113,113,0.1)", "rgba(248,113,113,0.3)"),
     }
-    val_color, badge_bg = grade_colors.get(grade, ("#c8a96e", "rgba(200,169,110,0.1)"))
+    val_color, badge_bg, glow = grade_colors.get(grade, ("#d4a843", "rgba(212,168,67,0.1)", "rgba(212,168,67,0.3)"))
     return f"""
-    <div style="background:#0d0d14;padding:22px 20px;position:relative;
-         border-right:1px solid rgba(255,255,255,0.04);flex:1;
-         transition:background 0.2s;">
-        <div style="font-size:9px;font-family:'Geist Mono',monospace;
-             color:rgba(200,190,170,0.4);text-transform:uppercase;
-             letter-spacing:0.14em;margin-bottom:10px">{label}</div>
-        <div style="font-family:'Geist Mono',monospace;font-size:1.75rem;
-             font-weight:500;line-height:1;margin-bottom:6px;
-             color:{val_color}">{value}</div>
+    <div style="background:#0b0b1e;padding:24px 20px;position:relative;overflow:hidden;
+         border-right:1px solid rgba(255,255,255,0.05);flex:1;transition:background 0.2s;">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;
+             background:linear-gradient(90deg,transparent,{val_color}50,transparent)"></div>
+        <div style="font-size:9px;font-family:'Space Mono',monospace;
+             color:rgba(205,200,230,0.35);text-transform:uppercase;
+             letter-spacing:0.14em;margin-bottom:12px">{label}</div>
+        <div style="font-family:'Space Mono',monospace;font-size:1.8rem;
+             font-weight:400;line-height:1;margin-bottom:10px;
+             color:{val_color};text-shadow:0 0 24px {glow}">{value}</div>
         <div style="display:inline-flex;align-items:center;gap:5px;
-             font-size:10px;font-family:'Geist Mono',monospace;
-             padding:2px 7px;border-radius:3px;
-             background:{badge_bg};color:{val_color}">
-            {grade} &nbsp; {desc[:28]}
+             font-size:10px;font-family:'Space Mono',monospace;
+             padding:3px 9px;border-radius:100px;
+             background:{badge_bg};color:{val_color};
+             border:1px solid {val_color}35">
+            {grade} · {desc[:28]}
         </div>
-        {"<div style='font-size:10px;color:rgba(200,190,170,0.35);font-family:Geist Mono,monospace;margin-top:4px'>" + sub + "</div>" if sub else ""}
+        {"<div style='font-size:10px;color:rgba(205,200,230,0.3);font-family:Space Mono,monospace;margin-top:8px'>" + sub + "</div>" if sub else ""}
     </div>"""
 
 # Build the 5 KPI cards
@@ -828,11 +852,19 @@ coc_fmt  = f"{metrics.cash_on_cash_return:.1f}%"
 dscr_fmt = f"{metrics.dscr:.2f}x"
 grm_fmt  = f"{metrics.gross_rent_multiplier:.1f}x"
 
+# Height adjuster — number_input has built-in ↑↓ arrows
+_, _kpi_ctl_col = st.columns([8, 1])
+with _kpi_ctl_col:
+    _kpi_h = st.number_input(
+        "H", value=170, min_value=130, max_value=320, step=5,
+        key="kpi_strip_h", label_visibility="collapsed",
+        help="Adjust KPI strip height (↑↓) if cards overlap the tab bar",
+    )
+
 kpi_strip_html = f"""
-<div style="display:flex;background:rgba(255,255,255,0.04);
-     border-top:1px solid rgba(255,255,255,0.04);
-     border-bottom:1px solid rgba(255,255,255,0.04);
-     margin:24px 0 0;">
+<div style="display:flex;background:rgba(255,255,255,0.03);
+     border-top:1px solid rgba(255,255,255,0.06);
+     border-bottom:1px solid rgba(255,255,255,0.06);">
     {kpi_card("Monthly Cash Flow", cf_fmt,   g["cash_flow"][0], g["cash_flow"][1], f"${metrics.annual_cash_flow:,.0f}/yr")}
     {kpi_card("Cap Rate",          cap_fmt,  g["cap_rate"][0],  g["cap_rate"][1],  "NOI / price")}
     {kpi_card("Cash-on-Cash",      coc_fmt,  g["coc"][0],       g["coc"][1],       f"on ${metrics.total_cash_invested:,.0f}")}
@@ -840,14 +872,14 @@ kpi_strip_html = f"""
     {kpi_card("GRM",               grm_fmt,  g["grm"][0],       g["grm"][1],       "lower = better")}
 </div>
 """
-components.html(kpi_strip_html, height=120)
+components.html(kpi_strip_html, height=_kpi_h)
 
 # ─────────────────────────────────────────────
 # Main Tabs
 # ─────────────────────────────────────────────
-tab_cf, tab_brrrr, tab_str, tab_comps, tab_amort, tab_macro = st.tabs([
+tab_cf, tab_brrrr, tab_str, tab_comps, tab_amort, tab_macro, tab_listings = st.tabs([
     "Cash Flow",  "BRRRR",  "STR / Airbnb",
-    "Rent Comps", "Amortization", "Market Data",
+    "Rent Comps", "Amortization", "Market Data", "Local Listings",
 ])
 
 # ───────────────────────────────
@@ -866,7 +898,7 @@ with tab_cf:
         fig = go.Figure(go.Waterfall(
             orientation="v", measure=measures, x=labels, y=values,
             text=[f"${abs(v):,.0f}" for v in values], textposition="outside",
-            textfont=dict(family="Geist Mono, monospace", size=10),
+            textfont=dict(family="Space Mono, monospace", size=10),
             connector=dict(line=dict(color="rgba(255,255,255,0.08)")),
             decreasing=dict(marker=dict(color=RED,   line=dict(width=0))),
             increasing=dict(marker=dict(color=GREEN, line=dict(width=0))),
@@ -884,13 +916,13 @@ with tab_cf:
 
         fig2 = go.Figure(go.Pie(
             labels=exp_labels, values=exp_vals, hole=0.58,
-            textinfo="percent", textfont=dict(family="Geist Mono, monospace", size=10),
+            textinfo="percent", textfont=dict(family="Space Mono, monospace", size=10),
             marker=dict(colors=colors_pie[:len(exp_vals)],
-                        line=dict(color="#0a0a0f", width=2)),
+                        line=dict(color="#050511", width=2)),
         ))
         fig2.add_annotation(
             text=f"${sum(exp_vals):,.0f}<br><span style='font-size:10px'>per month</span>",
-            font=dict(size=15, color="#e8e6e0", family="Geist Mono, monospace"),
+            font=dict(size=15, color="#e8e6f4", family="Space Mono, monospace"),
             showarrow=False,
         )
         apply_theme(fig, height=380,
@@ -960,7 +992,7 @@ with tab_cf:
     yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Cash Flow ($)", tickprefix="$"),
     yaxis2=dict(title="Value ($)", overlaying="y", side="right",
                 gridcolor="rgba(0,0,0,0)", tickprefix="$",
-                tickfont=dict(family="Geist Mono, monospace", size=10)),
+                tickfont=dict(family="Space Mono, monospace", size=10)),
     xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Year", dtick=1),
     legend=dict(orientation="h", y=1.1))
 st.plotly_chart(fig3, use_container_width=True, key="chart_projection")
@@ -979,13 +1011,16 @@ with tab_brrrr:
         bc1, bc2, bc3, bc4 = st.columns(4)
         def brrrr_kpi(col, label, val, color=GOLD):
             col.markdown(f"""
-            <div style="background:#0d0d14;border:1px solid rgba(255,255,255,0.07);
-                 border-radius:10px;padding:20px 16px;text-align:center;">
-                <div style="font-size:9px;font-family:'Geist Mono',monospace;
-                     color:rgba(200,190,170,0.4);text-transform:uppercase;
-                     letter-spacing:0.12em;margin-bottom:8px">{label}</div>
-                <div style="font-family:'Geist Mono',monospace;font-size:1.5rem;
-                     font-weight:500;color:{color}">{val}</div>
+            <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
+                 border-radius:12px;padding:22px 16px;text-align:center;
+                 position:relative;overflow:hidden;">
+                <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                     background:linear-gradient(90deg,transparent,{color}55,transparent)"></div>
+                <div style="font-size:9px;font-family:'Space Mono',monospace;
+                     color:rgba(205,200,230,0.35);text-transform:uppercase;
+                     letter-spacing:0.12em;margin-bottom:10px">{label}</div>
+                <div style="font-family:'Space Mono',monospace;font-size:1.5rem;
+                     font-weight:400;color:{color};text-shadow:0 0 20px {color}44">{val}</div>
             </div>""", unsafe_allow_html=True)
 
         cash_color = GREEN if b["cash_left_in_deal"] < 10_000 else GOLD
@@ -1050,13 +1085,16 @@ with tab_str:
     sc1, sc2, sc3, sc4 = st.columns(4)
     def str_kpi(col, label, val, color=GOLD):
         col.markdown(f"""
-        <div style="background:#0d0d14;border:1px solid rgba(255,255,255,0.07);
-             border-radius:10px;padding:20px 16px;text-align:center;">
-            <div style="font-size:9px;font-family:'Geist Mono',monospace;
-                 color:rgba(200,190,170,0.4);text-transform:uppercase;
-                 letter-spacing:0.12em;margin-bottom:8px">{label}</div>
-            <div style="font-family:'Geist Mono',monospace;font-size:1.4rem;
-                 font-weight:500;color:{color}">{val}</div>
+        <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
+             border-radius:12px;padding:22px 16px;text-align:center;
+             position:relative;overflow:hidden;">
+            <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                 background:linear-gradient(90deg,transparent,{color}55,transparent)"></div>
+            <div style="font-size:9px;font-family:'Space Mono',monospace;
+                 color:rgba(205,200,230,0.35);text-transform:uppercase;
+                 letter-spacing:0.12em;margin-bottom:10px">{label}</div>
+            <div style="font-family:'Space Mono',monospace;font-size:1.4rem;
+                 font-weight:400;color:{color};text-shadow:0 0 18px {color}44">{val}</div>
         </div>""", unsafe_allow_html=True)
 
     str_kpi(sc1, "STR Monthly Revenue",  f"${metrics.str_monthly_revenue:,.0f}")
@@ -1142,13 +1180,16 @@ with tab_comps:
                 em1, em2, em3 = st.columns(3)
                 def est_card(col, label, val):
                     col.markdown(f"""
-                    <div style="background:#0d0d14;border:1px solid rgba(255,255,255,0.07);
-                         border-radius:8px;padding:14px 16px;text-align:center;margin-bottom:12px">
-                        <div style="font-size:9px;font-family:'Geist Mono',monospace;
-                             color:rgba(200,190,170,0.35);text-transform:uppercase;
-                             letter-spacing:0.12em;margin-bottom:5px">{label}</div>
-                        <div style="font-family:'Geist Mono',monospace;font-size:1.2rem;
-                             color:#4ade80">{val}</div>
+                    <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
+                         border-radius:12px;padding:16px 16px;text-align:center;margin-bottom:12px;
+                         position:relative;overflow:hidden;">
+                        <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                             background:linear-gradient(90deg,transparent,#34d39955,transparent)"></div>
+                        <div style="font-size:9px;font-family:'Space Mono',monospace;
+                             color:rgba(205,200,230,0.3);text-transform:uppercase;
+                             letter-spacing:0.12em;margin-bottom:6px">{label}</div>
+                        <div style="font-family:'Space Mono',monospace;font-size:1.2rem;
+                             color:#34d399;text-shadow:0 0 16px rgba(52,211,153,0.35)">{val}</div>
                     </div>""", unsafe_allow_html=True)
                 est_card(em1, "Rent Low",    f"${est['rent_low']:,.0f}"    if est['rent_low']    else "—")
                 est_card(em2, "Rent Median", f"${est['rent_median']:,.0f}" if est['rent_median'] else "—")
@@ -1171,7 +1212,7 @@ with tab_comps:
 
     # Custom comps table
     st.markdown("""
-    <div style="background:#0d0d14;border:1px solid rgba(255,255,255,0.07);border-radius:10px;
+    <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);border-radius:14px;
          overflow:hidden;margin-top:8px">
         <div class="comp-row comp-header">
             <span>Address</span><span>Rent/mo</span><span>Bed/Bath</span>
@@ -1240,12 +1281,16 @@ with tab_amort:
         am1, am2, am3 = st.columns(3)
         def am_kpi(col, label, val):
             col.markdown(f"""
-            <div style="background:#0d0d14;border:1px solid rgba(255,255,255,0.07);
-                 border-radius:8px;padding:16px;text-align:center">
-                <div style="font-size:9px;font-family:'Geist Mono',monospace;
-                     color:rgba(200,190,170,0.35);text-transform:uppercase;
-                     letter-spacing:0.12em;margin-bottom:6px">{label}</div>
-                <div style="font-family:'Geist Mono',monospace;font-size:1.1rem;color:#c8a96e">{val}</div>
+            <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
+                 border-radius:12px;padding:18px 16px;text-align:center;
+                 position:relative;overflow:hidden;">
+                <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                     background:linear-gradient(90deg,transparent,#d4a84355,transparent)"></div>
+                <div style="font-size:9px;font-family:'Space Mono',monospace;
+                     color:rgba(205,200,230,0.3);text-transform:uppercase;
+                     letter-spacing:0.12em;margin-bottom:8px">{label}</div>
+                <div style="font-family:'Space Mono',monospace;font-size:1.1rem;
+                     color:#d4a843;text-shadow:0 0 16px rgba(212,168,67,0.35)">{val}</div>
             </div>""", unsafe_allow_html=True)
 
         total_interest = adf["interest"].sum()
@@ -1267,7 +1312,7 @@ with tab_amort:
     yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="$/Year", tickprefix="$"),
     yaxis2=dict(title="Balance", overlaying="y", side="right",
                 gridcolor="rgba(0,0,0,0)", tickprefix="$",
-                tickfont=dict(family="Geist Mono, monospace", size=10)))
+                tickfont=dict(family="Space Mono, monospace", size=10)))
         st.plotly_chart(fig_am, use_container_width=True, key="chart_amortization")
 
         if st.checkbox("Show full monthly schedule"):
@@ -1349,7 +1394,7 @@ with tab_macro:
     fig_rate.add_trace(go.Scatter(
         x=[s["rate"] for s in rate_sens], y=[s["cf"] for s in rate_sens],
         name="Monthly CF", line=dict(color=GOLD, width=2), fill="tozeroy",
-        fillcolor="rgba(200,169,110,0.05)"))
+        fillcolor="rgba(79,114,255,0.06)"))
     fig_rate.add_hline(y=0, line_dash="dash", line_color=RED, opacity=0.5)
     fig_rate.add_vline(x=interest_rate*100, line_dash="dot", line_color=BLUE, opacity=0.6,
         annotation_text=f"Your rate {interest_rate*100:.2f}%",
@@ -1368,19 +1413,194 @@ with tab_macro:
         Rising HPI → property appreciates → stronger BRRRR equity.
     </div>""", unsafe_allow_html=True)
 
+# ───────────────────────────────
+# TAB: Local Listings
+# ───────────────────────────────
+with tab_listings:
+    st.markdown('<div class="section-title">Listings Near This Property</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-size:12.5px;color:rgba(205,200,230,0.45);margin-bottom:16px">'
+        'Active rental and for-sale listings in the same area — powered by RentCast. '
+        'Scroll photos left/right inside each card to browse all listing images.</p>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Controls row ──────────────────────────────
+    lc0, lc1, lc2, lc3, lc4 = st.columns([2, 2, 1, 1, 1])
+    with lc0:
+        listing_type = st.radio(
+            "Type", ["Rental", "For Sale"],
+            horizontal=True, label_visibility="collapsed",
+            key="listing_type",
+        )
+        st.caption("Listing type")
+    with lc1:
+        listing_zip = st.text_input(
+            "Search ZIP", value=zip_code,
+            placeholder="ZIP code", label_visibility="collapsed",
+            key="listing_zip_input",
+        )
+        st.caption(f"ZIP code to search  (currently {zip_code})")
+    with lc2:
+        listing_beds = st.selectbox(
+            "Beds", ["Any", 1, 2, 3, 4, 5],
+            label_visibility="collapsed", key="listing_beds",
+        )
+        st.caption("Bedrooms filter")
+    with lc3:
+        listing_max_price = st.number_input(
+            "Max Price", value=0, step=100, format="%d",
+            label_visibility="collapsed", key="listing_max_rent",
+        )
+        st.caption("Max price (0 = any)")
+    with lc4:
+        listing_limit = st.selectbox(
+            "Show", [6, 9, 12, 18],
+            label_visibility="collapsed", key="listing_limit",
+        )
+        st.caption("Results to show")
+
+    fetch_btn = st.button("Search Listings", key="btn_fetch_listings",
+                          use_container_width=False)
+
+    rc_key_listings = get_secret("RENTCAST_API_KEY")
+    gmaps_key_listings = get_secret("GOOGLE_MAPS_API_KEY")
+
+    _cache_key = f"local_listings_{listing_type}"
+    if fetch_btn or _cache_key not in st.session_state:
+        if rc_key_listings:
+            spinner_label = "Fetching rental listings…" if listing_type == "Rental" else "Fetching for-sale listings…"
+            with st.spinner(spinner_label):
+                fetcher = ListingsFetcher(
+                    rentcast_key=rc_key_listings,
+                    gmaps_key=gmaps_key_listings,
+                )
+                beds_filter  = None if listing_beds == "Any" else int(listing_beds)
+                price_filter = int(listing_max_price) if listing_max_price else None
+                if listing_type == "Rental":
+                    results = fetcher.fetch_by_zip(
+                        zip_code=listing_zip or zip_code,
+                        bedrooms=beds_filter,
+                        max_rent=price_filter,
+                        limit=int(listing_limit),
+                    )
+                else:
+                    results = fetcher.fetch_for_sale_by_zip(
+                        zip_code=listing_zip or zip_code,
+                        bedrooms=beds_filter,
+                        max_price=price_filter,
+                        limit=int(listing_limit),
+                    )
+                st.session_state[_cache_key] = results or []
+        else:
+            st.session_state[_cache_key] = DEMO_LISTINGS[:int(listing_limit)]
+
+    listings_to_show = st.session_state.get(_cache_key, DEMO_LISTINGS[:6])
+
+    if not listings_to_show:
+        st.markdown(
+            '<div class="info-banner">No active listings found for that ZIP. '
+            'Try a nearby ZIP or remove filters.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        if not rc_key_listings:
+            st.markdown(
+                '<div class="info-banner">No RentCast API key — showing demo listings. '
+                'Add <code>RENTCAST_API_KEY</code> to secrets.toml for live data.</div>',
+                unsafe_allow_html=True,
+            )
+
+        # ── Photo card grid (3 per row) ──────────
+        is_sale_tab = listing_type == "For Sale"
+        cols_per_row = 3
+        rows = [listings_to_show[i:i + cols_per_row]
+                for i in range(0, len(listings_to_show), cols_per_row)]
+
+        for row in rows:
+            grid_cols = st.columns(cols_per_row, gap="medium")
+            for col, listing in zip(grid_cols, row):
+                addr       = listing.get("address", "")
+                city       = listing.get("city", "")
+                state      = listing.get("state", "")
+                price      = listing.get("rent", 0)
+                beds       = listing.get("beds", "—")
+                baths      = listing.get("baths", "—")
+                sqft       = listing.get("sqft", 0)
+                days       = listing.get("days_on", "—")
+                ptype      = listing.get("property_type", "")
+                photo_urls = listing.get("photo_urls") or [listing.get("photo_url", "")]
+                url        = listing.get("listing_url", "")
+
+                if is_sale_tab or listing.get("is_sale"):
+                    price_str = f"${price:,.0f}" if price else "—"
+                    price_cls = "listing-card-rent sale-price-badge"
+                else:
+                    price_str = f"${price:,.0f}/mo" if price else "—"
+                    price_cls = "listing-card-rent"
+
+                sqft_str  = f"{sqft:,.0f} sqft" if sqft else ""
+                beds_str  = f"{beds} bd" if beds != "—" else "—"
+                baths_str = f"{baths} ba" if baths != "—" else "—"
+
+                link_open  = f'<a href="{url}" target="_blank" style="text-decoration:none">' if url else "<div>"
+                link_close = "</a>" if url else "</div>"
+
+                # Build photo carousel — all photos, scroll-snap
+                photo_imgs = "".join(
+                    f'<img src="{p}" alt="{addr}" loading="lazy" '
+                    f'onerror="this.style.display=\'none\'">'
+                    for p in photo_urls
+                )
+                n_photos    = len(photo_urls)
+                count_badge = (
+                    f'<div class="photo-count-badge">{n_photos} photo{"s" if n_photos != 1 else ""}</div>'
+                    if n_photos > 1 else ""
+                )
+
+                col.markdown(f"""
+{link_open}
+<div class="listing-card">
+    <div class="photo-reel-wrap">
+        <div class="photo-reel">{photo_imgs}</div>
+        {count_badge}
+    </div>
+    <div class="listing-card-body">
+        <div class="{price_cls}">{price_str}</div>
+        <div class="listing-card-addr">{addr}, {city}, {state}</div>
+        {"" if not ptype else f'<div class="listing-card-type">{ptype}</div>'}
+        <div class="listing-card-badges">
+            {"" if beds == "—" else f'<span class="listing-badge">{beds_str}</span>'}
+            {"" if baths == "—" else f'<span class="listing-badge">{baths_str}</span>'}
+            {"" if not sqft_str else f'<span class="listing-badge">{sqft_str}</span>'}
+        </div>
+        <div class="listing-card-meta">{days}d on market</div>
+    </div>
+</div>
+{link_close}
+""", unsafe_allow_html=True)
+
+        st.markdown(
+            f'<p style="font-size:10.5px;color:rgba(205,200,230,0.25);'
+            f'font-family:Space Mono,monospace;margin-top:16px">'
+            f'{len(listings_to_show)} listings · ZIP {listing_zip or zip_code} · '
+            f'{"For Sale" if is_sale_tab else "Rental"} · '
+            f'Source: RentCast{"" if rc_key_listings else " (demo)"}</p>',
+            unsafe_allow_html=True,
+        )
+
 # ─────────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────────
 st.markdown("""
 <div style="margin-top:48px;padding:20px 36px;border-top:1px solid rgba(255,255,255,0.05);
      display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-    <span style="font-family:'Geist Mono',monospace;font-size:10px;color:rgba(200,190,170,0.25);
+    <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(205,200,230,0.25);
           text-transform:uppercase;letter-spacing:0.1em">
         DealSight · Not financial advice
     </span>
-    <span style="font-family:'Geist Mono',monospace;font-size:10px;color:rgba(200,190,170,0.2)">
+    <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(205,200,230,0.2)">
         Data: RentCast · Zillow · FRED · ATTOM · Census · Google Maps
     </span>
 </div>
 """, unsafe_allow_html=True)
-

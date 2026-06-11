@@ -1,0 +1,16 @@
+# ── Streamlit / Python requirements ──────────────────────────────────────────
+braintrust
+streamlit>=1.32.0
+plotly>=5.20.0
+pandas>=2.1.0
+requests>=2.31.0
+supabase>=2.4.0
+python-dotenv>=1.0.0
+dataclasses-json>=0.6.4
+
+# Data source clients
+# rentcast: REST via requests (no package needed)
+# zillow: REST via RapidAPI + requests
+# attom: REST via requests
+# fred: REST via requests
+# census: REST via requests
