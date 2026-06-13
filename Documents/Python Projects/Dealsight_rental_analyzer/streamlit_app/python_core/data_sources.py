@@ -6,7 +6,6 @@ All methods return normalized dicts; callers handle None gracefully.
 """
 
 import os
-import time
 import logging
 from typing import Optional
 import requests
@@ -17,11 +16,11 @@ logger = logging.getLogger(__name__)
 # Config – set via environment / Streamlit secrets
 # ─────────────────────────────────────────────
 
-RENTCAST_KEY   = os.getenv("RENTCAST_API_KEY", "839086d2336e4b3c82b131b99ebc8a81")
-ATTOM_KEY      = os.getenv("ATTOM_API_KEY", "fd7b32fdf942d549f4954643886f4dca")
-FRED_KEY       = os.getenv("FRED_API_KEY", "")   # free at fred.stlouisfed.org
-CENSUS_KEY     = os.getenv("CENSUS_API_KEY", "a66823cd6eaf303640a6c5bb757597ced5c5d2ab")  # free at api.census.gov
-RAPIDAPI_KEY   = os.getenv("RAPIDAPI_KEY", "34ac648f6dmsh43b80d9e87aef04p11e08fjsn4a33aea74f55")    # Zillow via RapidAPI
+RENTCAST_KEY  = os.getenv("RENTCAST_API_KEY", "")
+ATTOM_KEY     = os.getenv("ATTOM_API_KEY", "")
+FRED_KEY      = os.getenv("FRED_API_KEY", "")
+CENSUS_KEY    = os.getenv("CENSUS_API_KEY", "")
+RAPIDAPI_KEY  = os.getenv("RAPIDAPI_KEY", "")
 
 
 def _get(url: str, headers: dict = None, params: dict = None,
@@ -38,41 +37,6 @@ def _get(url: str, headers: dict = None, params: dict = None,
 # ─────────────────────────────────────────────
 # RentCast  (rentcast.io)
 # ─────────────────────────────────────────────
-
-class RentCastClient:
-    BASE = "https://api.rentcast.io/v1"
-
-    def __init__(self, api_key: str = RENTCAST_KEY):
-        self.headers = {"X-Api-Key": api_key, "Accept": "application/json"}
-
-    def rent_estimate(self, address: str = None,
-                      latitude: float = None, longitude: float = None,
-                      bedrooms: int = 3, bathrooms: float = 2,
-                      property_type: str = "Single Family",
-                      square_footage: int = None) -> Optional[dict]:
-        params = {
-            "bedrooms": bedrooms,
-            "bathrooms": bathrooms,
-            "propertyType": property_type,
-        }
-        if address:
-            params["address"] = address
-        elif latitude and longitude:
-            params["latitude"] = latitude
-            params["longitude"] = longitude
-        if square_footage:
-            params["squareFootage"] = square_footage
-
-        data = _get(f"{self.BASE}/avm/rent/long-term",
-                    headers=self.headers, params=params)
-        if not data:
-            return None
-        return {
-            "rent_low":    data.get("rentRangeLow"),
-            "rent_median": data.get("rent"),
-            "rent_high":   data.get("rentRangeHigh"),
-            "comps":       data.get("comparables", [])[:5],
-        }
 
 class RentCastClient:
     BASE = "https://api.rentcast.io/v1"
@@ -241,9 +205,6 @@ class ATTOMClient:
         }
 
     def property_detail(self, address: str, city_state: str) -> Optional[dict]:
-        parts = city_state.split(",")
-        city = parts[0].strip() if parts else ""
-        state = parts[1].strip() if len(parts) > 1 else ""
         params = {
             "address1": address,
             "address2": city_state,
@@ -312,30 +273,29 @@ class FREDClient:
             return None
         return data.get("observations", [])
 
+    def _latest(self, series_id: str, scale: float = 1.0) -> Optional[float]:
+        obs = self._series(series_id)
+        if obs and obs[0]["value"] != ".":
+            return float(obs[0]["value"]) * scale
+        return None
+
     def mortgage_30yr_fixed(self) -> Optional[float]:
-        obs = self._series("MORTGAGE30US")
-        return float(obs[0]["value"]) / 100 if obs and obs[0]["value"] != "." else None
+        return self._latest("MORTGAGE30US", scale=0.01)
 
     def mortgage_15yr_fixed(self) -> Optional[float]:
-        obs = self._series("MORTGAGE15US")
-        return float(obs[0]["value"]) / 100 if obs and obs[0]["value"] != "." else None
+        return self._latest("MORTGAGE15US", scale=0.01)
 
     def federal_funds_rate(self) -> Optional[float]:
-        obs = self._series("FEDFUNDS")
-        return float(obs[0]["value"]) / 100 if obs and obs[0]["value"] != "." else None
+        return self._latest("FEDFUNDS", scale=0.01)
 
     def cpi_inflation(self) -> Optional[float]:
-        obs = self._series("CPIAUCSL")
-        return float(obs[0]["value"]) if obs and obs[0]["value"] != "." else None
+        return self._latest("CPIAUCSL")
 
     def unemployment_rate(self) -> Optional[float]:
-        obs = self._series("UNRATE")
-        return float(obs[0]["value"]) if obs and obs[0]["value"] != "." else None
+        return self._latest("UNRATE")
 
     def hpi_us(self) -> Optional[float]:
-        """House Price Index – national"""
-        obs = self._series("USSTHPI")
-        return float(obs[0]["value"]) if obs and obs[0]["value"] != "." else None
+        return self._latest("USSTHPI")
 
     def get_market_summary(self) -> dict:
         return {
@@ -400,7 +360,7 @@ class CensusClient:
                        int(result.get("POP_2020", 0))) /
                       max(int(result.get("POP_2020", 1)), 1)) * 100
             result["pop_growth_2yr_pct"] = round(growth, 2)
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             pass
         return result
 

@@ -4,7 +4,7 @@ Rental Property Deal Analyzer - Core Calculations Engine
 All financial metrics: cash flow, cap rate, DSCR, CoC, BRRRR, STR/Airbnb
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from typing import Optional
 import math
 
@@ -55,6 +55,21 @@ class PropertyInputs:
     refi_closing_costs: float = 3000.0
 
 
+@dataclass(frozen=True)
+class BRRRRResult:
+    arv: float
+    refi_loan_amount: float
+    refi_monthly_payment: float
+    cash_out_at_refi: float
+    refi_closing_costs: float
+    cash_left_in_deal: float
+    post_refi_monthly_cf: float
+    post_refi_coc_return: float
+    equity_captured: float
+    total_profit_if_sold: float
+    infinite_returns: bool
+
+
 @dataclass
 class DealMetrics:
     # Inputs echo
@@ -92,7 +107,31 @@ class DealMetrics:
     str_coc_return: float = 0.0
 
     # BRRRR
-    brrrr: Optional[dict] = None
+    brrrr: Optional[BRRRRResult] = None
+
+
+# ─────────────────────────────────────────────
+# Grading thresholds
+# ─────────────────────────────────────────────
+_CF_A,   _CF_B                  = 300,  100
+_CR_A,   _CR_B,   _CR_C         = 8.0,  6.0,  4.0
+_COC_A,  _COC_B,  _COC_C        = 12.0, 8.0,  5.0
+_DSCR_A, _DSCR_B, _DSCR_C       = 1.25, 1.10, 1.0
+_GRM_A,  _GRM_B,  _GRM_C        = 8.0,  12.0, 16.0
+_STR_SUPPLIES   = 200
+_STR_UTIL_EXTRA = 100
+
+
+# ─────────────────────────────────────────────
+# Shared mortgage payment formula
+# ─────────────────────────────────────────────
+def _calc_payment(principal: float, annual_rate: float, years: int) -> float:
+    if principal <= 0:
+        return 0.0
+    r, n = annual_rate / 12, years * 12
+    if r == 0:
+        return principal / n
+    return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
 
 
 # ─────────────────────────────────────────────
@@ -114,15 +153,9 @@ class DealAnalyzer:
 
     def _monthly_payment(self, principal: float, annual_rate: float,
                           years: int, interest_only: bool = False) -> float:
-        if principal <= 0:
-            return 0.0
         if interest_only:
-            return principal * (annual_rate / 12)
-        r = annual_rate / 12
-        n = years * 12
-        if r == 0:
-            return principal / n
-        return principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
+            return principal * (annual_rate / 12) if principal > 0 else 0.0
+        return _calc_payment(principal, annual_rate, years)
 
     # ── Income ──────────────────────────────────
 
@@ -136,7 +169,6 @@ class DealAnalyzer:
 
     def _expense_breakdown_monthly(self) -> dict:
         gross = self._gross_monthly_income()
-        down = self._down_payment()
         loan = self._loan_amount()
         payment = self._monthly_payment(loan, self.i.loan_interest_rate,
                                          self.i.loan_term_years,
@@ -172,6 +204,8 @@ class DealAnalyzer:
         return gross_annual - annual_opex
 
     def _cap_rate(self) -> float:
+        if self.i.purchase_price == 0:
+            return 0.0
         noi = self._noi_annual()
         return (noi / self.i.purchase_price) * 100
 
@@ -227,16 +261,14 @@ class DealAnalyzer:
         breakdown["property_mgmt"] = 0.0  # usually self-managed for STR
         breakdown["vacancy"] = 0.0         # occupancy already factored
         total_exp = sum(breakdown.values())
-        # Add STR-specific: supplies ~$200/mo, higher utilities
-        str_opex_extra = 200 + 100  # supplies + extra utilities
-        return str_rev - total_exp - str_opex_extra
+        return str_rev - total_exp - _STR_SUPPLIES - _STR_UTIL_EXTRA
 
     # ── BRRRR Analysis ───────────────────────────
 
-    def _brrrr_analysis(self) -> dict:
+    def _brrrr_analysis(self) -> Optional[BRRRRResult]:
         arv = self.i.after_repair_value
         if arv <= 0:
-            return {}
+            return None
 
         refi_loan = arv * self.i.refi_ltv
         refi_payment = self._monthly_payment(refi_loan, self.i.refi_interest_rate,
@@ -245,7 +277,6 @@ class DealAnalyzer:
         total_invested = self._total_cash_invested()
         cash_left_in = max(total_invested - cash_out - self.i.refi_closing_costs, 0)
 
-        # Post-refi cash flow
         breakdown = self._expense_breakdown_monthly()
         breakdown["mortgage"] = refi_payment
         egi_monthly = self._effective_gross_income_monthly()
@@ -254,21 +285,20 @@ class DealAnalyzer:
                          if cash_left_in > 100 else float("inf"))
 
         equity_captured = arv - self.i.purchase_price - self.i.rehab_costs
-        total_profit_if_sold = equity_captured - self.i.closing_costs
 
-        return {
-            "arv": arv,
-            "refi_loan_amount": round(refi_loan, 2),
-            "refi_monthly_payment": round(refi_payment, 2),
-            "cash_out_at_refi": round(cash_out, 2),
-            "refi_closing_costs": self.i.refi_closing_costs,
-            "cash_left_in_deal": round(cash_left_in, 2),
-            "post_refi_monthly_cf": round(post_refi_cf, 2),
-            "post_refi_coc_return": round(post_refi_coc, 2),
-            "equity_captured": round(equity_captured, 2),
-            "total_profit_if_sold": round(total_profit_if_sold, 2),
-            "infinite_returns": cash_left_in < 100,
-        }
+        return BRRRRResult(
+            arv=arv,
+            refi_loan_amount=round(refi_loan, 2),
+            refi_monthly_payment=round(refi_payment, 2),
+            cash_out_at_refi=round(cash_out, 2),
+            refi_closing_costs=self.i.refi_closing_costs,
+            cash_left_in_deal=round(cash_left_in, 2),
+            post_refi_monthly_cf=round(post_refi_cf, 2),
+            post_refi_coc_return=round(post_refi_coc, 2),
+            equity_captured=round(equity_captured, 2),
+            total_profit_if_sold=round(equity_captured - self.i.closing_costs, 2),
+            infinite_returns=cash_left_in < 100,
+        )
 
     # ── Main Analyze ─────────────────────────────
 
@@ -316,7 +346,7 @@ class DealAnalyzer:
             str_annual_revenue=round(str_rev * 12, 2),
             str_monthly_cash_flow=round(str_cf, 2),
             str_coc_return=round(str_coc, 2),
-            brrrr=self._brrrr_analysis() if self.i.after_repair_value > 0 else None,
+            brrrr=self._brrrr_analysis(),
         )
 
 
@@ -326,13 +356,9 @@ class DealAnalyzer:
 
 def amortization_schedule(principal: float, annual_rate: float,
                            years: int) -> list[dict]:
+    payment = _calc_payment(principal, annual_rate, years)
     r = annual_rate / 12
     n = years * 12
-    if r == 0:
-        payment = principal / n
-    else:
-        payment = principal * (r * (1 + r) ** n) / ((1 + r) ** n - 1)
-
     balance = principal
     rows = []
     total_interest = 0.0
@@ -360,57 +386,52 @@ def amortization_schedule(principal: float, annual_rate: float,
 def grade_deal(metrics: DealMetrics) -> dict:
     grades = {}
 
-    # Cash Flow
     cf = metrics.monthly_cash_flow
-    if cf >= 300:
+    if cf >= _CF_A:
         grades["cash_flow"] = ("A", "Strong positive cash flow")
-    elif cf >= 100:
+    elif cf >= _CF_B:
         grades["cash_flow"] = ("B", "Marginally positive cash flow")
     elif cf >= 0:
         grades["cash_flow"] = ("C", "Break-even – watch expenses")
     else:
         grades["cash_flow"] = ("F", "Negative cash flow – avoid")
 
-    # Cap Rate
     cr = metrics.cap_rate
-    if cr >= 8:
+    if cr >= _CR_A:
         grades["cap_rate"] = ("A", "Excellent cap rate (≥8%)")
-    elif cr >= 6:
+    elif cr >= _CR_B:
         grades["cap_rate"] = ("B", "Good cap rate (6-8%)")
-    elif cr >= 4:
+    elif cr >= _CR_C:
         grades["cap_rate"] = ("C", "Below average (4-6%)")
     else:
         grades["cap_rate"] = ("F", "Poor cap rate (<4%)")
 
-    # CoC
     coc = metrics.cash_on_cash_return
-    if coc >= 12:
+    if coc >= _COC_A:
         grades["coc"] = ("A", "Excellent CoC (≥12%)")
-    elif coc >= 8:
+    elif coc >= _COC_B:
         grades["coc"] = ("B", "Good CoC (8-12%)")
-    elif coc >= 5:
+    elif coc >= _COC_C:
         grades["coc"] = ("C", "Acceptable CoC (5-8%)")
     else:
         grades["coc"] = ("F", "Poor CoC (<5%)")
 
-    # DSCR
     dscr = metrics.dscr
-    if dscr >= 1.25:
+    if dscr >= _DSCR_A:
         grades["dscr"] = ("A", "Lender-friendly DSCR (≥1.25)")
-    elif dscr >= 1.10:
+    elif dscr >= _DSCR_B:
         grades["dscr"] = ("B", "Adequate DSCR (1.10-1.25)")
-    elif dscr >= 1.0:
+    elif dscr >= _DSCR_C:
         grades["dscr"] = ("C", "Risky – barely covers debt")
     else:
         grades["dscr"] = ("F", "DSCR below 1.0 – loan risk")
 
-    # GRM (lower = better)
     grm = metrics.gross_rent_multiplier
-    if grm <= 8:
+    if grm <= _GRM_A:
         grades["grm"] = ("A", "Excellent GRM (≤8)")
-    elif grm <= 12:
+    elif grm <= _GRM_B:
         grades["grm"] = ("B", "Good GRM (8-12)")
-    elif grm <= 16:
+    elif grm <= _GRM_C:
         grades["grm"] = ("C", "Average GRM (12-16)")
     else:
         grades["grm"] = ("F", "High GRM (>16) – overpriced")

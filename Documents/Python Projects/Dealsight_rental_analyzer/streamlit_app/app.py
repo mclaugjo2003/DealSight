@@ -1,4 +1,4 @@
-"""
+﻿"""
 DealSight — Rental Property Deal Analyzer
 Slick professional UI with Google Maps integration
 Run: streamlit run streamlit_app/app.py  (from project root)
@@ -11,17 +11,24 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from dataclasses import asdict
+from dataclasses import asdict, replace as dc_replace
 import urllib.parse
-import streamlit as st
 import streamlit.components.v1 as components
 from python_core.calculations import PropertyInputs, DealAnalyzer, grade_deal, amortization_schedule
 from python_core.data_sources import RentCastClient, FREDClient
 from python_core.listings import ListingsFetcher, DEMO_LISTINGS
+from python_core.utils import (
+    GOLD, GREEN, RED, BLUE, PURPLE,
+    fmt_usd, fmt_pct, fmt_label,
+    kpi_card, simple_kpi, apply_theme,
+)
 
-import braintrust
-braintrust.init_logger(project="DealSight")
-braintrust.auto_instrument()
+try:
+    import braintrust
+    braintrust.init_logger(project="DealSight")
+    braintrust.auto_instrument()
+except Exception:
+    pass
 
 # ─────────────────────────────────────────────
 # Helpers
@@ -41,8 +48,8 @@ def n(val: int | float | None, default: float = 0.0) -> float:
 # Page Config
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="DealSight – Deal Analyzer",
-    page_icon="🏠",
+    page_title="DealSight - Deal Analyzer",
+    page_icon="ðŸ ",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -51,421 +58,22 @@ st.set_page_config(
 # Global CSS — Premium Fintech Real Estate theme
 # ─────────────────────────────────────────────
 def inject_css() -> None:
-    st.markdown("""<style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
-
-    /* ── CSS Variables ───────────────────────── */
-    :root {
-        --bg-deep: #050511;
-        --bg-card: #0b0b1e;
-        --bg-surface: #10102a;
-        --bg-sidebar: #06060f;
-        --accent-blue: #4f72ff;
-        --accent-blue-dim: rgba(79,114,255,0.18);
-        --accent-blue-glow: rgba(79,114,255,0.28);
-        --accent-gold: #d4a843;
-        --accent-gold-dim: rgba(212,168,67,0.15);
-        --accent-purple: #8b5cf6;
-        --text-primary: #e8e6f4;
-        --text-sec: rgba(205,200,230,0.58);
-        --text-muted: rgba(205,200,230,0.3);
-        --green: #34d399;
-        --red: #f87171;
-        --border: rgba(255,255,255,0.07);
-    }
-
-    /* ── Hide default Streamlit chrome ───────── */
-    #MainMenu, footer, header { visibility: hidden; }
-    .block-container { padding: 0 !important; max-width: 100% !important; }
-    section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
-
-    /* ── App background with subtle gradient mesh ── */
-    .stApp { background: var(--bg-deep) !important; }
-
-    /* ── Sidebar ─────────────────────────────── */
-    [data-testid="stSidebar"] {
-        background: var(--bg-sidebar) !important;
-        border-right: 1px solid var(--border) !important;
-    }
-    [data-testid="stSidebar"] * { color: var(--text-sec) !important; }
-    [data-testid="stSidebar"] .stNumberInput input,
-    [data-testid="stSidebar"] .stTextInput input,
-    [data-testid="stSidebar"] .stSelectbox select {
-        background: rgba(255,255,255,0.04) !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        border-radius: 8px !important;
-        color: var(--text-primary) !important;
-        font-family: 'Space Mono', monospace !important;
-        font-size: 13px !important;
-    }
-    [data-testid="stSidebar"] .stNumberInput input:focus,
-    [data-testid="stSidebar"] .stTextInput input:focus {
-        border-color: var(--accent-blue) !important;
-        box-shadow: 0 0 0 2px var(--accent-blue-dim) !important;
-    }
-    [data-testid="stSidebar"] .stSlider [data-baseweb="slider"] div[role="slider"] {
-        background: var(--accent-blue) !important;
-        border-color: var(--accent-blue) !important;
-    }
-    [data-testid="stSidebar"] .stSlider [data-baseweb="track-background"] div {
-        background: rgba(79,114,255,0.15) !important;
-    }
-    [data-testid="stSidebar"] .stSlider [data-baseweb="track-foreground"] div {
-        background: var(--accent-blue) !important;
-    }
-
-    /* ── Main area ───────────────────────────── */
-    .main-wrapper { padding: 0; min-height: 100vh; }
-
-    /* ── Top bar ─────────────────────────────── */
-    .topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 36px;
-        height: 62px;
-        background: rgba(5,5,17,0.95);
-        backdrop-filter: blur(24px);
-        -webkit-backdrop-filter: blur(24px);
-        border-bottom: 1px solid rgba(255,255,255,0.06);
-        position: sticky; top: 0; z-index: 100;
-        position: relative;
-}
-    /* Gradient accent line at bottom of topbar */
-    .topbar::after {
-        content: '';
-        position: absolute;
-        bottom: 0; left: 0; right: 0; height: 1px;
-        background: linear-gradient(90deg, transparent 0%, rgba(79,114,255,0.6) 30%, rgba(212,168,67,0.5) 70%, transparent 100%);
-    }
-    .topbar-logo {
-        font-family: 'Space Grotesk', sans-serif;
-        font-size: 1.25rem; font-weight: 700;
-        letter-spacing: -0.02em;
-        background: linear-gradient(135deg, #ffffff 0%, var(--accent-gold) 120%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        display: flex; align-items: center; gap: 10px;
-    }
-    .topbar-logo .logo-box {
-        width: 30px; height: 30px;
-        background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
-        border-radius: 8px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 15px;
-        box-shadow: 0 0 18px rgba(79,114,255,0.4);
-        -webkit-text-fill-color: initial;
-        color: white; flex-shrink: 0;
-    }
-    .topbar-address {
-        font-family: 'Space Mono', monospace;
-        font-size: 11px;
-        letter-spacing: 0.05em;
-        padding: 6px 16px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1); border-radius: 100px;
-        max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        transition: border-color .2s;
-    }
-    .topbar-status {
-        display: flex; align-items: center; gap: 8px;
-        font-size: 11px; color: var(--text-muted);
-        font-family: 'Space Mono', monospace;
-    }
-    .status-dot {
-        width: 6px; height: 6px; border-radius: 50%;
-        background: var(--green);
-        box-shadow: 0 0 10px rgba(52,211,153,0.6);
-        animation: pulse-green 2s infinite;
-    }
-    @keyframes pulse-green {
-        0%,100% { opacity:1; box-shadow: 0 0 10px rgba(52,211,153,0.6); }
-        50%      { opacity:0.55; box-shadow: 0 0 4px rgba(52,211,153,0.2); }
-    }
-
-    /* ── Section headers ─────────────────────── */
-    .section-title {
-        font-family: 'Space Grotesk', sans-serif;
-        font-size: 0.75rem; font-weight: 600;
-        color: var(--text-primary);
-        padding: 20px 0 12px;
-        display: flex; align-items: center; gap: 10px;
-        text-transform: uppercase; letter-spacing: 0.1em;
-    }
-    .section-title::after {
-        content: ''; flex: 1; height: 1px;
-        background: linear-gradient(90deg, rgba(255,255,255,0.08), transparent);
-    }
-
-    /* ── Property detail pills ───────────────── */
-    .detail-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 16px; }
-    .detail-pill {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
-        transition: border-color .2s, background .2s;
-    }
-    .detail-pill:hover { background: rgba(79,114,255,0.05); border-color: rgba(79,114,255,0.2); }
-    .detail-pill .dp-label {
-        font-size: 9px; font-family: 'Space Mono', monospace;
-        color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px;
-    }
-    .detail-pill .dp-value { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-primary); }
-
-    /* ── Expense rows ────────────────────────── */
-    .expense-row {
-        display: flex; justify-content: space-between; align-items: center;
-        padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px;
-    }
-    .expense-row:last-child { border-bottom: none; }
-    .expense-row .er-label { color: var(--text-sec); font-family: 'Plus Jakarta Sans', sans-serif; }
-    .expense-row .er-value { font-family: 'Space Mono', monospace; color: var(--red); font-size: 12.5px; }
-    .expense-row .er-value.positive { color: var(--green); }
-    .expense-row .er-value.gold     { color: var(--accent-gold); }
-    .expense-row .er-value.neutral  { color: var(--text-primary); }
-
-    /* ── Stat rows ───────────────────────────── */
-    .stat-row {
-        display: flex; justify-content: space-between;
-        padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px;
-    }
-    .stat-row .sr-label { color: var(--text-sec); font-family: 'Plus Jakarta Sans', sans-serif; }
-    .stat-row .sr-value { font-family: 'Space Mono', monospace; font-size: 12.5px; color: var(--text-primary); }
-
-    /* ── Tabs ────────────────────────────────── */
-    .stTabs [data-baseweb="tab-list"] {
-        background: transparent !important;
-        border-bottom: 1px solid var(--border) !important;
-        gap: 4px !important; padding: 0 36px !important;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background: transparent !important;
-        border: none !important;
-        color: var(--text-sec) !important;
-        font-family: 'Space Grotesk', sans-serif !important;
-        font-size: 12px !important; font-weight: 500 !important;
-        text-transform: uppercase !important; letter-spacing: 0.06em !important;
-        padding: 12px 18px !important;
-        transition: all .2s !important;
-        border-bottom: 2px solid transparent !important;
-        margin-bottom: -1px !important;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: var(--text-primary) !important;
-        background: rgba(79,114,255,0.05) !important;
-    }
-    .stTabs [aria-selected="true"] {
-        color: var(--accent-blue) !important;
-        border-bottom-color: var(--accent-blue) !important;
-        background: transparent !important;
-    }
-    .stTabs [data-baseweb="tab-panel"] { padding: 28px 36px !important; background: transparent !important; }
-
-    /* ── Buttons ─────────────────────────────── */
-    .stButton > button {
-        background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%) !important;
-        color: #ffffff !important; border: none !important; border-radius: 8px !important;
-        font-family: 'Space Grotesk', sans-serif !important; font-weight: 600 !important;
-        font-size: 13px !important; padding: 10px 24px !important;
-        transition: all .2s !important; letter-spacing: 0.02em !important;
-        box-shadow: 0 4px 18px rgba(79,114,255,0.32) !important;
-    }
-    .stButton > button:hover { transform: translateY(-1px) !important; box-shadow: 0 6px 24px rgba(79,114,255,0.48) !important; }
-    .stButton > button:active { transform: translateY(0) !important; }
-
-    /* ── Sidebar section labels ──────────────── */
-    .sidebar-section {
-        font-size: 9px; font-family: 'Space Mono', monospace;
-        text-transform: uppercase; letter-spacing: 0.14em;
-        color: rgba(79,114,255,0.65);
-        padding: 16px 0 6px;
-        border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px;
-    }
-    .sidebar-section:first-child { border-top: none; margin-top: 0; }
-
-    /* ── BRRRR steps ─────────────────────────── */
-    .brrrr-step {
-        display: flex; justify-content: space-between; align-items: center;
-        padding: 11px 14px; background: rgba(255,255,255,0.02);
-        border-radius: 8px; margin-bottom: 6px;
-        border-left: 3px solid rgba(255,255,255,0.07);
-        transition: background .15s;
-    }
-    .brrrr-step:hover { background: rgba(255,255,255,0.04); }
-    .brrrr-step.highlight { border-left-color: var(--accent-gold); background: var(--accent-gold-dim); }
-    .brrrr-step.positive  { border-left-color: var(--green); background: rgba(52,211,153,0.04); }
-    .brrrr-step.negative  { border-left-color: var(--red); background: rgba(248,113,113,0.04); }
-    .brrrr-step .bs-label { font-size: 12.5px; color: var(--text-sec); font-family: 'Plus Jakarta Sans', sans-serif; }
-    .brrrr-step .bs-val   { font-family: 'Space Mono', monospace; font-size: 13px; color: var(--text-primary); }
-
-    /* ── Comps table ─────────────────────────── */
-    .comp-row {
-        display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-        padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
-        font-size: 12.5px; transition: background .15s;
-    }
-    .comp-row:hover { background: rgba(79,114,255,0.04); }
-    .comp-row.comp-header {
-        font-family: 'Space Mono', monospace; font-size: 9px; text-transform: uppercase;
-        letter-spacing: 0.1em; color: var(--text-muted);
-        border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 2px;
-    }
-    .comp-row .cr-addr { color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .comp-row .cr-rent { font-family: 'Space Mono', monospace; color: var(--green); font-weight: 500; }
-    .comp-row .cr-stat { font-family: 'Space Mono', monospace; color: var(--text-muted); }
-
-    /* ── Macro ticker ────────────────────────── */
-    .macro-ticker {
-        display: flex; background: rgba(255,255,255,0.02);
-        border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
-    }
-    .macro-item {
-        flex: 1; padding: 18px 14px;
-        border-right: 1px solid rgba(255,255,255,0.05); text-align: center;
-        transition: background .15s;
-    }
-    .macro-item:hover { background: rgba(79,114,255,0.04); }
-    .macro-item:last-child { border-right: none; }
-    .macro-item .mi-label {
-        font-size: 9px; font-family: 'Space Mono', monospace; color: var(--text-muted);
-        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;
-    }
-    .macro-item .mi-val { font-family: 'Space Mono', monospace; font-size: 1.15rem; font-weight: 400; color: var(--text-primary); }
-    .macro-item .mi-val.up   { color: var(--green); }
-    .macro-item .mi-val.warn { color: #fb923c; }
-
-    /* ── Banners ─────────────────────────────── */
-    .info-banner {
-        background: rgba(79,114,255,0.06);
-        border: 1px solid rgba(79,114,255,0.2); border-radius: 10px; padding: 14px 18px;
-        font-size: 13px; color: rgba(180,190,255,0.8); margin: 12px 0;
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
-    .success-banner {
-        background: rgba(52,211,153,0.06);
-        border: 1px solid rgba(52,211,153,0.2); border-radius: 10px; padding: 14px 18px;
-        font-size: 13px; color: rgba(52,211,153,0.85); margin: 12px 0;
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
-
-    /* ── Scrollbar ───────────────────────────── */
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(79,114,255,0.25); border-radius: 2px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(79,114,255,0.45); }
-
-    /* ── Plotly charts ───────────────────────── */
-    .js-plotly-plot .plotly .modebar { display: none !important; }
-    .stPlotlyChart { border-radius: 12px; overflow: hidden; }
-
-    /* ── Grade colors ────────────────────────── */
-    .cf-pos { color: var(--green); }
-    .cf-neg { color: var(--red); }
-    .cf-neu { color: var(--accent-gold); }
-    .grade-A { color: var(--green); }
-    .grade-B { color: #a3e635; }
-    .grade-C { color: #fbbf24; }
-    .grade-F { color: var(--red); }
-    .grade-bg-A { background: rgba(52,211,153,0.1);  color: var(--green); }
-    .grade-bg-B { background: rgba(163,230,53,0.1);  color: #a3e635; }
-    .grade-bg-C { background: rgba(251,191,36,0.1);  color: #fbbf24; }
-    .grade-bg-F { background: rgba(248,113,113,0.1); color: var(--red); }
-
-    /* ── Listing cards ───────────────────────── */
-    .listing-card {
-        background: var(--bg-card); border: 1px solid var(--border);
-        border-radius: 14px; overflow: hidden;
-        transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; height: 100%;
-    }
-    .listing-card:hover {
-        border-color: rgba(79,114,255,0.35); transform: translateY(-3px);
-        box-shadow: 0 8px 32px rgba(79,114,255,0.12);
-    }
-    .listing-card img { width: 100%; height: 200px; object-fit: cover; display: block; background: var(--bg-surface); }
-    /* ── Photo carousel reel ── */
-    .photo-reel-wrap { position: relative; border-radius: 14px 14px 0 0; overflow: hidden; }
-    .photo-reel {
-        display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
-        scrollbar-width: none; height: 200px;
-    }
-    .photo-reel::-webkit-scrollbar { display: none; }
-    .photo-reel img {
-        min-width: 100%; height: 200px; object-fit: cover;
-        scroll-snap-align: start; flex-shrink: 0;
-        background: var(--bg-surface);
-    }
-    .photo-count-badge {
-        position: absolute; bottom: 8px; right: 8px;
-        background: rgba(0,0,0,0.60); backdrop-filter: blur(4px);
-        color: rgba(255,255,255,0.82); font-size: 9.5px;
-        font-family: 'Space Mono', monospace;
-        padding: 2px 8px; border-radius: 100px; pointer-events: none;
-    }
-    .sale-price-badge {
-        color: var(--accent-gold) !important;
-    }
-    .listing-card-body { padding: 14px 16px 16px; }
-    .listing-card-rent {
-        font-family: 'Space Mono', monospace; font-size: 1.25rem; font-weight: 700;
-        color: var(--accent-blue); margin-bottom: 4px;
-    }
-    .listing-card-addr {
-        font-size: 12.5px; color: var(--text-sec); margin-bottom: 10px;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
-    .listing-card-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .listing-badge {
-        background: var(--accent-blue-dim); border: 1px solid rgba(79,114,255,0.18);
-        border-radius: 100px; padding: 3px 10px;
-        font-family: 'Space Mono', monospace; font-size: 10px; color: rgba(160,170,255,0.75);
-    }
-    .listing-card-meta { font-size: 10.5px; color: var(--text-muted); font-family: 'Space Mono', monospace; }
-    .listing-card-type {
-        display: inline-block; background: var(--accent-gold-dim);
-        border: 1px solid rgba(212,168,67,0.22); border-radius: 100px;
-        padding: 2px 9px; font-size: 9.5px; color: rgba(212,168,67,0.8);
-        text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;
-        font-family: 'Space Mono', monospace;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    _css_path = os.path.join(os.path.dirname(__file__), "styles.css")
+    with open(_css_path) as _f:
+        st.markdown(f"<style>{_f.read()}</style>", unsafe_allow_html=True)
 inject_css()
-# Plotly theme factory
-# ─────────────────────────────────────────────
-def apply_theme(fig: go.Figure, height: int = 380, **kwargs) -> go.Figure:
-    """Apply consistent dark theme to any Plotly figure."""
 
-    axis_defaults = dict(
-        gridcolor = "rgba(255,255,255,0.04)",
-        linecolor = "rgba(255,255,255,0.08)",
-        zeroline  = False,
-    )
-
-    layout: dict = {
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "plot_bgcolor":  "#0b0b1e",
-        "font":          dict(family="Space Mono, monospace", color="rgba(205,200,230,0.5)", size=11),
-        "legend":        dict(orientation="h", y=1.08, font=dict(size=10)),
-        "margin":        dict(t=40, b=40, l=12, r=12),
-        "height":        height,
-        "xaxis":         axis_defaults,
-        "yaxis":         axis_defaults,
-    }
-
-    layout.update(kwargs)
-    return fig
-GOLD   = "#d4a843"
-GREEN  = "#34d399"
-RED    = "#f87171"
-BLUE   = "#4f72ff"
-PURPLE = "#8b5cf6"
 # ─────────────────────────────────────────────
 # Session-state defaults (address search writes here)
 # ─────────────────────────────────────────────
-st.session_state.setdefault("sb_address",  "123 Main St")
-st.session_state.setdefault("sb_city_st",  "Phoenix, AZ")
-st.session_state.setdefault("sb_zip_code", "85001")
+DEMO_ADDRESS       = "123 Main St"
+DEMO_CITY_STATE    = "Phoenix, AZ"
+DEMO_ZIP           = "85001"
+LISTINGS_COLS_PER_ROW = 3
+
+st.session_state.setdefault("sb_address",  DEMO_ADDRESS)
+st.session_state.setdefault("sb_city_st",  DEMO_CITY_STATE)
+st.session_state.setdefault("sb_zip_code", DEMO_ZIP)
 
 # Apply pending address updates before widgets are instantiated
 for _wk, _pk in [("sb_address", "_pending_sb_address"),
@@ -484,7 +92,7 @@ with st.sidebar:
         <div style="width:28px;height:28px;border-radius:7px;flex-shrink:0;
              background:linear-gradient(135deg,#4f72ff 0%,#8b5cf6 100%);
              display:flex;align-items:center;justify-content:center;font-size:14px;
-             box-shadow:0 0 14px rgba(79,114,255,0.4)">🏠</div>
+             box-shadow:0 0 14px rgba(79,114,255,0.4)">ðŸ </div>
         <span style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;
               letter-spacing:-0.01em;
               background:linear-gradient(135deg,#ffffff,#d4a843);
@@ -502,7 +110,7 @@ with st.sidebar:
     purchase_price: int = st.number_input("Purchase Price",  value=350_000, step=5_000, format="%d", label_visibility="collapsed")
     st.caption("Purchase price ($)")
     down_pct: float = st.slider("Down Payment", 5, 50, 20, label_visibility="collapsed") / 100
-    st.caption(f"Down payment  {int(down_pct*100)}%  ·  ${purchase_price*down_pct:,.0f}")
+    st.caption(f"Down payment  {int(down_pct*100)}%  Â·  ${purchase_price*down_pct:,.0f}")
     closing_costs: int = st.number_input("Closing Costs",   value=6_000, step=500, format="%d", label_visibility="collapsed")
     st.caption("Closing costs ($)")
     rehab_costs    = st.number_input("Rehab Costs",     value=0,     step=1_000, format="%d", label_visibility="collapsed")
@@ -597,12 +205,12 @@ cf_color = "cf-pos" if metrics.monthly_cash_flow > 0 else ("cf-neg" if metrics.m
 st.markdown(f"""
 <div class="topbar">
     <div class="topbar-logo">
-        <div class="logo-box" style="width:38px;height:38px;font-size:18px;border-radius:10px;">🏠</div>
+        <div class="logo-box" style="width:38px;height:38px;font-size:18px;border-radius:10px;">ðŸ </div>
         DealSight
     </div>
     <div class="topbar-address" style="color:{'#e8e6f4' if address != '123 Main St' else 'rgba(180,185,255,0.55)'};
          {'font-weight:500;' if address != '123 Main St' else ''}">
-        {'🔍 ' if address == '123 Main St' else ''}{full_address if address != "123 Main St" else "Enter an address below →"}
+        {'🔍 ' if address == '123 Main St' else ''}{full_address if address != "123 Main St" else "Enter an address below ↑"}
     </div>
     <div class="topbar-status">
         <div class="status-dot"></div>
@@ -627,7 +235,7 @@ with _srch_c:
         key="addr_search_box",
     )
 with _srch_btn_c:
-    _search_go = st.button("Analyze →", key="btn_addr_search", use_container_width=True)
+    _search_go = st.button("Analyze ↑", key="btn_addr_search", use_container_width=True)
 
 if _search_go and _search_query.strip():
     _txt = _search_query.strip()
@@ -653,7 +261,7 @@ st.markdown('<div style="padding: 16px 36px 0;">', unsafe_allow_html=True)
 map_col, info_col = st.columns([3, 2], gap="large")
 
 with map_col:
-    st.markdown('<div class="section-title">📍 Property Location</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🔍 Property Location</div>', unsafe_allow_html=True)
 
     if maps_key:
         # Google Maps Embed — shows map + street view toggle
@@ -679,7 +287,7 @@ with map_col:
         components.html(map_html, height=350)
 
         # Street View
-        with st.expander("🏠 Street View"):
+        with st.expander("ðŸ  Street View"):
             sv_html = f"""
             <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);">
                 <iframe
@@ -692,33 +300,6 @@ with map_col:
             """
             components.html(sv_html, height=270)
     else:
-        # Fallback — OpenStreetMap via iframe (no key needed)
-        osm_html = f"""
-        <div style="position:relative;border-radius:12px;overflow:hidden;
-             border:1px solid rgba(255,255,255,0.07);height:340px;">
-            <div style="position:absolute;top:12px;left:12px;z-index:10;
-                 background:rgba(5,5,17,0.88);backdrop-filter:blur(10px);
-                 border:1px solid rgba(79,114,255,0.3);border-radius:6px;
-                 padding:5px 10px;font-size:10px;font-family:monospace;
-                 color:#d4a843;text-transform:uppercase;letter-spacing:0.1em;">
-                OpenStreetMap · Add GOOGLE_MAPS_API_KEY for Google Maps
-            </div>
-            <iframe
-                width="100%" height="340"
-                frameborder="0" scrolling="no"
-                marginheight="0" marginwidth="0"
-                style="border:0;display:block;filter:invert(0.9) hue-rotate(180deg) saturate(0.7);"
-                src="https://www.openstreetmap.org/export/embed.html?bbox=-112.2,33.3,-111.8,33.5&layer=mapnik&marker=33.4,{encoded_address}"
-                src="https://maps.google.com/maps?q={encoded_address}&t=&z=15&ie=UTF8&iwloc=&output=embed">
-            </iframe>
-        </div>
-        <div style="font-size:10px;color:rgba(205,200,230,0.28);padding:6px 0;
-             font-family:monospace;text-align:center;">
-            Add GOOGLE_MAPS_API_KEY to secrets.toml for Google Maps + Street View
-        </div>
-        """
-        # Clean OSM embed
-        osm_url = f"https://www.openstreetmap.org/export/embed.html?query={encoded_address}&layer=mapnik"
         osm_clean = f"""
         <div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);height:340px;position:relative;">
             <div style="position:absolute;top:12px;left:12px;z-index:10;
@@ -743,7 +324,7 @@ with map_col:
         components.html(osm_clean, height=370)
 
 with info_col:
-    st.markdown('<div class="section-title">🏡 Deal Summary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">ðŸ¡ Deal Summary</div>', unsafe_allow_html=True)
 
     loan_amount = metrics.loan_amount
     monthly_pmt = metrics.monthly_payment
@@ -812,43 +393,11 @@ with info_col:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# KPI Strip
-# ─────────────────────────────────────────────
-def kpi_card(label: str, value: str, grade: str, desc: str, sub: str = "") -> str:
-    grade_colors = {
-        "A": ("#34d399", "rgba(52,211,153,0.1)",  "rgba(52,211,153,0.3)"),
-        "B": ("#a3e635", "rgba(163,230,53,0.1)",  "rgba(163,230,53,0.3)"),
-        "C": ("#fbbf24", "rgba(251,191,36,0.1)",  "rgba(251,191,36,0.3)"),
-        "F": ("#f87171", "rgba(248,113,113,0.1)", "rgba(248,113,113,0.3)"),
-    }
-    val_color, badge_bg, glow = grade_colors.get(grade, ("#d4a843", "rgba(212,168,67,0.1)", "rgba(212,168,67,0.3)"))
-    return f"""
-    <div style="background:#0b0b1e;padding:24px 20px;position:relative;overflow:hidden;
-         border-right:1px solid rgba(255,255,255,0.05);flex:1;transition:background 0.2s;">
-        <div style="position:absolute;top:0;left:0;right:0;height:2px;
-             background:linear-gradient(90deg,transparent,{val_color}50,transparent)"></div>
-        <div style="font-size:9px;font-family:'Space Mono',monospace;
-             color:rgba(205,200,230,0.35);text-transform:uppercase;
-             letter-spacing:0.14em;margin-bottom:12px">{label}</div>
-        <div style="font-family:'Space Mono',monospace;font-size:1.8rem;
-             font-weight:400;line-height:1;margin-bottom:10px;
-             color:{val_color};text-shadow:0 0 24px {glow}">{value}</div>
-        <div style="display:inline-flex;align-items:center;gap:5px;
-             font-size:10px;font-family:'Space Mono',monospace;
-             padding:3px 9px;border-radius:100px;
-             background:{badge_bg};color:{val_color};
-             border:1px solid {val_color}35">
-            {grade} · {desc[:28]}
-        </div>
-        {"<div style='font-size:10px;color:rgba(205,200,230,0.3);font-family:Space Mono,monospace;margin-top:8px'>" + sub + "</div>" if sub else ""}
-    </div>"""
-
 # Build the 5 KPI cards
 g = grades  # shorthand
-cf_fmt   = f"${metrics.monthly_cash_flow:+,.0f}"
-cap_fmt  = f"{metrics.cap_rate*100:.2f}%"
-coc_fmt  = f"{metrics.cash_on_cash_return:.1f}%"
+cf_fmt   = fmt_usd(metrics.monthly_cash_flow, sign=True)
+cap_fmt  = fmt_pct(metrics.cap_rate * 100, decimals=2)
+coc_fmt  = fmt_pct(metrics.cash_on_cash_return)
 dscr_fmt = f"{metrics.dscr:.2f}x"
 grm_fmt  = f"{metrics.gross_rent_multiplier:.1f}x"
 
@@ -865,10 +414,10 @@ kpi_strip_html = f"""
 <div style="display:flex;background:rgba(255,255,255,0.03);
      border-top:1px solid rgba(255,255,255,0.06);
      border-bottom:1px solid rgba(255,255,255,0.06);">
-    {kpi_card("Monthly Cash Flow", cf_fmt,   g["cash_flow"][0], g["cash_flow"][1], f"${metrics.annual_cash_flow:,.0f}/yr")}
+    {kpi_card("Monthly Cash Flow", cf_fmt,   g["cash_flow"][0], g["cash_flow"][1], f"{fmt_usd(metrics.annual_cash_flow)}/yr")}
     {kpi_card("Cap Rate",          cap_fmt,  g["cap_rate"][0],  g["cap_rate"][1],  "NOI / price")}
-    {kpi_card("Cash-on-Cash",      coc_fmt,  g["coc"][0],       g["coc"][1],       f"on ${metrics.total_cash_invested:,.0f}")}
-    {kpi_card("DSCR",              dscr_fmt, g["dscr"][0],      g["dscr"][1],      "≥1.25 lender pref")}
+    {kpi_card("Cash-on-Cash",      coc_fmt,  g["coc"][0],       g["coc"][1],       f"on {fmt_usd(metrics.total_cash_invested)}")}
+    {kpi_card("DSCR",              dscr_fmt, g["dscr"][0],      g["dscr"][1],      "â‰¥1.25 lender pref")}
     {kpi_card("GRM",               grm_fmt,  g["grm"][0],       g["grm"][1],       "lower = better")}
 </div>
 """
@@ -891,7 +440,7 @@ with tab_cf:
     with col_wf:
         st.markdown('<div class="section-title">Waterfall</div>', unsafe_allow_html=True)
         bd = metrics.expense_breakdown
-        labels   = ["Gross Rent"] + [k.replace("_"," ").title() for k in bd] + ["Net Cash Flow"]
+        labels   = ["Gross Rent"] + [fmt_label(k) for k in bd] + ["Net Cash Flow"]
         values   = [metrics.gross_monthly_income] + [-v for v in bd.values()] + [metrics.monthly_cash_flow]
         measures = ["absolute"] + ["relative"] * len(bd) + ["total"]
 
@@ -910,7 +459,7 @@ with tab_cf:
         
     with col_exp:
         st.markdown('<div class="section-title">Expense Breakdown</div>', unsafe_allow_html=True)
-        exp_labels = [k.replace("_"," ").title() for k in bd]
+        exp_labels = [fmt_label(k) for k in bd]
         exp_vals   = list(bd.values())
         colors_pie = ["#e86e4a", "#60a5fa", "#a78bfa", "#34d399", "#fb923c", "#f472b6", "#94a3b8"]
 
@@ -925,7 +474,7 @@ with tab_cf:
             font=dict(size=15, color="#e8e6f4", family="Space Mono, monospace"),
             showarrow=False,
         )
-        apply_theme(fig, height=380,
+        apply_theme(fig2, height=380,
         xaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickangle=-20, tickfont=dict(size=10)))
         st.plotly_chart(fig2, use_container_width=True, key="chart_expense_donut")
 
@@ -937,7 +486,7 @@ with tab_cf:
 
     with icol1:
         for k, v in items[:half+1]:
-            label = k.replace("_"," ").title()
+            label = fmt_label(k)
             st.markdown(f"""
             <div class="expense-row">
                 <span class="er-label">{label}</span>
@@ -946,7 +495,7 @@ with tab_cf:
 
     with icol2:
         for k, v in items[half+1:]:
-            label = k.replace("_"," ").title()
+            label = fmt_label(k)
             st.markdown(f"""
             <div class="expense-row">
                 <span class="er-label">{label}</span>
@@ -995,7 +544,7 @@ with tab_cf:
                 tickfont=dict(family="Space Mono, monospace", size=10)),
     xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Year", dtick=1),
     legend=dict(orientation="h", y=1.1))
-st.plotly_chart(fig3, use_container_width=True, key="chart_projection")
+    st.plotly_chart(fig3, use_container_width=True, key="chart_projection")
 
 # ───────────────────────────────
 # TAB: BRRRR
@@ -1004,37 +553,23 @@ with tab_brrrr:
     if not metrics.brrrr:
         st.markdown("""
         <div class="info-banner">
-            💡 Enter an <strong>After Repair Value (ARV)</strong> in the sidebar to unlock BRRRR analysis.
+            ðŸ'¡ Enter an <strong>After Repair Value (ARV)</strong> in the sidebar to unlock BRRRR analysis.
         </div>""", unsafe_allow_html=True)
     else:
         b = metrics.brrrr
         bc1, bc2, bc3, bc4 = st.columns(4)
-        def brrrr_kpi(col, label, val, color=GOLD):
-            col.markdown(f"""
-            <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
-                 border-radius:12px;padding:22px 16px;text-align:center;
-                 position:relative;overflow:hidden;">
-                <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                     background:linear-gradient(90deg,transparent,{color}55,transparent)"></div>
-                <div style="font-size:9px;font-family:'Space Mono',monospace;
-                     color:rgba(205,200,230,0.35);text-transform:uppercase;
-                     letter-spacing:0.12em;margin-bottom:10px">{label}</div>
-                <div style="font-family:'Space Mono',monospace;font-size:1.5rem;
-                     font-weight:400;color:{color};text-shadow:0 0 20px {color}44">{val}</div>
-            </div>""", unsafe_allow_html=True)
+        cash_color = GREEN if b.cash_left_in_deal < 10_000 else GOLD
+        simple_kpi(bc1, "Cash Left In Deal",  fmt_usd(b.cash_left_in_deal),        cash_color)
+        simple_kpi(bc2, "Cash Out at Refi",   fmt_usd(b.cash_out_at_refi),         GOLD)
+        cf_col    = GREEN if b.post_refi_monthly_cf > 0 else RED
+        simple_kpi(bc3, "Post-Refi CF / mo",  fmt_usd(b.post_refi_monthly_cf, sign=True), cf_col)
+        coc_label = "∞ Infinite" if b.infinite_returns else fmt_pct(b.post_refi_coc_return)
+        simple_kpi(bc4, "Post-Refi CoC",      coc_label, GREEN)
 
-        cash_color = GREEN if b["cash_left_in_deal"] < 10_000 else GOLD
-        brrrr_kpi(bc1, "Cash Left In Deal",  f"${b['cash_left_in_deal']:,.0f}", cash_color)
-        brrrr_kpi(bc2, "Cash Out at Refi",   f"${b['cash_out_at_refi']:,.0f}",  GOLD)
-        cf_col = GREEN if b["post_refi_monthly_cf"] > 0 else RED
-        brrrr_kpi(bc3, "Post-Refi CF / mo",  f"${b['post_refi_monthly_cf']:+,.0f}", cf_col)
-        coc_label = "∞ Infinite" if b["infinite_returns"] else f"{b['post_refi_coc_return']:.1f}%"
-        brrrr_kpi(bc4, "Post-Refi CoC",      coc_label, GREEN)
-
-        if b["infinite_returns"]:
+        if b.infinite_returns:
             st.markdown("""
             <div class="success-banner" style="margin-top:16px">
-                🎯 <strong>Infinite returns achieved</strong> — the refinance returns ALL of your invested capital
+                ðŸŽ¯ <strong>Infinite returns achieved</strong> — the refinance returns ALL of your invested capital
                 while the property still cash flows positively. This is the holy grail of the BRRRR strategy.
             </div>""", unsafe_allow_html=True)
 
@@ -1044,15 +579,15 @@ with tab_brrrr:
         with bl:
             st.markdown('<div class="section-title">BRRRR Flow</div>', unsafe_allow_html=True)
             steps = [
-                ("Purchase Price",      f"${b['arv'] - b['equity_captured']:,.0f}", ""),
-                ("+ Rehab Costs",       f"${rehab_costs:,.0f}",                     ""),
-                ("= Total All-In",      f"${purchase_price + rehab_costs:,.0f}",    "highlight"),
-                ("After Repair Value",  f"${b['arv']:,.0f}",                         "positive"),
-                ("Refi Loan (75% LTV)", f"${b['refi_loan_amount']:,.0f}",            ""),
-                ("− Refi Closing",      f"(${b['refi_closing_costs']:,.0f})",        ""),
-                ("Cash Returned",       f"${b['cash_out_at_refi']:,.0f}",            "positive"),
-                ("Cash Left In Deal",   f"${b['cash_left_in_deal']:,.0f}",           "highlight"),
-                ("Equity Captured",     f"${b['equity_captured']:,.0f}",             "positive"),
+                ("Purchase Price",      fmt_usd(b.arv - b.equity_captured),              ""),
+                ("+ Rehab Costs",       fmt_usd(rehab_costs),                            ""),
+                ("= Total All-In",      fmt_usd(purchase_price + rehab_costs),           "highlight"),
+                ("After Repair Value",  fmt_usd(b.arv),                                  "positive"),
+                ("Refi Loan (75% LTV)", fmt_usd(b.refi_loan_amount),                     ""),
+                ("− Refi Closing",      f"({fmt_usd(b.refi_closing_costs)})",            ""),
+                ("Cash Returned",       fmt_usd(b.cash_out_at_refi),                     "positive"),
+                ("Cash Left In Deal",   fmt_usd(b.cash_left_in_deal),                    "highlight"),
+                ("Equity Captured",     fmt_usd(b.equity_captured),                      "positive"),
             ]
             for label, val, cls in steps:
                 st.markdown(f"""
@@ -1064,12 +599,12 @@ with tab_brrrr:
         with br:
             st.markdown('<div class="section-title">Post-Refinance Snapshot</div>', unsafe_allow_html=True)
             post_items = [
-                ("Refi loan amount",      f"${b['refi_loan_amount']:,.0f}"),
-                ("New monthly payment",   f"${b['refi_monthly_payment']:,.0f}"),
-                ("Post-refi CF / mo",     f"${b['post_refi_monthly_cf']:+,.0f}"),
-                ("Post-refi CF / yr",     f"${b['post_refi_monthly_cf']*12:,.0f}"),
+                ("Refi loan amount",      fmt_usd(b.refi_loan_amount)),
+                ("New monthly payment",   fmt_usd(b.refi_monthly_payment)),
+                ("Post-refi CF / mo",     fmt_usd(b.post_refi_monthly_cf, sign=True)),
+                ("Post-refi CF / yr",     fmt_usd(b.post_refi_monthly_cf * 12)),
                 ("Cash-on-cash (post)",   coc_label),
-                ("Infinite returns",      "✅ Yes" if b["infinite_returns"] else "✗ No"),
+                ("Infinite returns",      "✅ Yes" if b.infinite_returns else "✗ No"),
             ]
             for label, val in post_items:
                 st.markdown(f"""
@@ -1083,36 +618,14 @@ with tab_brrrr:
 # ───────────────────────────────
 with tab_str:
     sc1, sc2, sc3, sc4 = st.columns(4)
-    def str_kpi(col, label, val, color=GOLD):
-        col.markdown(f"""
-        <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
-             border-radius:12px;padding:22px 16px;text-align:center;
-             position:relative;overflow:hidden;">
-            <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                 background:linear-gradient(90deg,transparent,{color}55,transparent)"></div>
-            <div style="font-size:9px;font-family:'Space Mono',monospace;
-                 color:rgba(205,200,230,0.35);text-transform:uppercase;
-                 letter-spacing:0.12em;margin-bottom:10px">{label}</div>
-            <div style="font-family:'Space Mono',monospace;font-size:1.4rem;
-                 font-weight:400;color:{color};text-shadow:0 0 18px {color}44">{val}</div>
-        </div>""", unsafe_allow_html=True)
-
-    str_kpi(sc1, "STR Monthly Revenue",  f"${metrics.str_monthly_revenue:,.0f}")
-    str_kpi(sc2, "STR Annual Revenue",   f"${metrics.str_annual_revenue:,.0f}")
-    cf_col = GREEN if metrics.str_monthly_cash_flow > 0 else RED
-    str_kpi(sc3, "STR Monthly CF",       f"${metrics.str_monthly_cash_flow:+,.0f}", cf_col)
+    simple_kpi(sc1, "STR Monthly Revenue", fmt_usd(metrics.str_monthly_revenue))
+    simple_kpi(sc2, "STR Annual Revenue",  fmt_usd(metrics.str_annual_revenue))
+    cf_col  = GREEN if metrics.str_monthly_cash_flow > 0 else RED
+    simple_kpi(sc3, "STR Monthly CF",      fmt_usd(metrics.str_monthly_cash_flow, sign=True), cf_col)
     coc_col = GREEN if metrics.str_coc_return >= 8 else GOLD
-    str_kpi(sc4, "STR CoC Return",       f"{metrics.str_coc_return:.1f}%", coc_col)
+    simple_kpi(sc4, "STR CoC Return",      fmt_pct(metrics.str_coc_return), coc_col)
 
     st.markdown('<div class="section-title" style="margin-top:24px">LTR vs STR Comparison</div>', unsafe_allow_html=True)
-
-    compare_data = {
-        "":                ["Long-Term (LTR)",                        "Short-Term (STR)"],
-        "Monthly Revenue": [f"${metrics.gross_monthly_income:,.0f}", f"${metrics.str_monthly_revenue:,.0f}"],
-        "Monthly CF":      [f"${metrics.monthly_cash_flow:+,.0f}",   f"${metrics.str_monthly_cash_flow:+,.0f}"],
-        "Annual CF":       [f"${metrics.annual_cash_flow:,.0f}",      f"${metrics.str_monthly_cash_flow*12:,.0f}"],
-        "CoC Return":      [f"{metrics.cash_on_cash_return:.1f}%",    f"{metrics.str_coc_return:.1f}%"],
-    }
 
     # Visual comparison bars
     fig_comp = go.Figure()
@@ -1124,31 +637,28 @@ with tab_str:
         marker_color=GOLD, marker_line=dict(width=0)))
     apply_theme(fig_comp, height=300, barmode="group",
     yaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickprefix="$"))
-st.plotly_chart(fig_comp, use_container_width=True, key="chart_str_comparison")
+    st.plotly_chart(fig_comp, use_container_width=True, key="chart_str_comparison")
 
     # Occupancy sensitivity
-st.markdown('<div class="section-title">Occupancy Sensitivity</div>', unsafe_allow_html=True)
-occ_range = [i/100 for i in range(30, 100, 5)]
-orig = inputs.str_occupancy_rate
-sens = []
-for occ in occ_range:
-        inputs.str_occupancy_rate = occ
-        tmp = DealAnalyzer(inputs).analyze()
+    st.markdown('<div class="section-title">Occupancy Sensitivity</div>', unsafe_allow_html=True)
+    occ_range = [i/100 for i in range(30, 100, 5)]
+    sens = []
+    for occ in occ_range:
+        tmp = DealAnalyzer(dc_replace(inputs, str_occupancy_rate=occ)).analyze()
         sens.append({"occ": occ*100, "rev": tmp.str_monthly_revenue, "cf": tmp.str_monthly_cash_flow})
-inputs.str_occupancy_rate = orig
 
-fig_s = go.Figure()
-fig_s.add_trace(go.Scatter(x=[s["occ"] for s in sens], y=[s["rev"] for s in sens],
-        name="STR Revenue", line=dict(color=GOLD, width=2)))
-fig_s.add_trace(go.Scatter(x=[s["occ"] for s in sens], y=[s["cf"] for s in sens],
-        name="STR Cash Flow", line=dict(color=GREEN, width=2)))
-fig_s.add_hline(y=0, line_dash="dash", line_color=RED, opacity=0.4)
-fig_s.add_vline(x=str_occ*100, line_dash="dot", line_color=GOLD, opacity=0.5,
-        annotation_text=f"Current {str_occ*100:.0f}%", annotation_font_color=GOLD)
-apply_theme(fig_s, height=320,
-    xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Occupancy (%)", ticksuffix="%"),
-    yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="$/month",        tickprefix="$"))
-st.plotly_chart(fig_s, use_container_width=True, key="chart_str_sensitivity")
+    fig_s = go.Figure()
+    fig_s.add_trace(go.Scatter(x=[s["occ"] for s in sens], y=[s["rev"] for s in sens],
+            name="STR Revenue", line=dict(color=GOLD, width=2)))
+    fig_s.add_trace(go.Scatter(x=[s["occ"] for s in sens], y=[s["cf"] for s in sens],
+            name="STR Cash Flow", line=dict(color=GREEN, width=2)))
+    fig_s.add_hline(y=0, line_dash="dash", line_color=RED, opacity=0.4)
+    fig_s.add_vline(x=str_occ*100, line_dash="dot", line_color=GOLD, opacity=0.5,
+            annotation_text=f"Current {str_occ*100:.0f}%", annotation_font_color=GOLD)
+    apply_theme(fig_s, height=320,
+        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Occupancy (%)", ticksuffix="%"),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="$/month",        tickprefix="$"))
+    st.plotly_chart(fig_s, use_container_width=True, key="chart_str_sensitivity")
 
 # ───────────────────────────────
 # TAB: Rent Comps
@@ -1167,7 +677,7 @@ with tab_comps:
         if not rc_key:
             st.markdown("""
             <div class="info-banner">
-                ⚠️ Add <code>RENTCAST_API_KEY</code> to <code>.streamlit/secrets.toml</code> to fetch live comps.
+                âš ï¸ Add <code>RENTCAST_API_KEY</code> to <code>.streamlit/secrets.toml</code> to fetch live comps.
             </div>""", unsafe_allow_html=True)
         else:
             with st.spinner("Fetching from RentCast..."):
@@ -1178,22 +688,9 @@ with tab_comps:
 
             if est:
                 em1, em2, em3 = st.columns(3)
-                def est_card(col, label, val):
-                    col.markdown(f"""
-                    <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
-                         border-radius:12px;padding:16px 16px;text-align:center;margin-bottom:12px;
-                         position:relative;overflow:hidden;">
-                        <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                             background:linear-gradient(90deg,transparent,#34d39955,transparent)"></div>
-                        <div style="font-size:9px;font-family:'Space Mono',monospace;
-                             color:rgba(205,200,230,0.3);text-transform:uppercase;
-                             letter-spacing:0.12em;margin-bottom:6px">{label}</div>
-                        <div style="font-family:'Space Mono',monospace;font-size:1.2rem;
-                             color:#34d399;text-shadow:0 0 16px rgba(52,211,153,0.35)">{val}</div>
-                    </div>""", unsafe_allow_html=True)
-                est_card(em1, "Rent Low",    f"${est['rent_low']:,.0f}"    if est['rent_low']    else "—")
-                est_card(em2, "Rent Median", f"${est['rent_median']:,.0f}" if est['rent_median'] else "—")
-                est_card(em3, "Rent High",   f"${est['rent_high']:,.0f}"   if est['rent_high']   else "—")
+                simple_kpi(em1, "Rent Low",    fmt_usd(est['rent_low'])    if est['rent_low']    else "N/A", GREEN, "1.2rem")
+                simple_kpi(em2, "Rent Median", fmt_usd(est['rent_median']) if est['rent_median'] else "N/A", GREEN, "1.2rem")
+                simple_kpi(em3, "Rent High",   fmt_usd(est['rent_high'])   if est['rent_high']   else "N/A", GREEN, "1.2rem")
 
             if comps:
                 st.session_state["live_comps"] = comps
@@ -1259,9 +756,9 @@ with tab_comps:
 
         pct_diff = ((monthly_rent - avg_rent) / avg_rent) * 100
         if pct_diff > 5:
-            st.markdown(f'<div class="info-banner">⚠️ Your rent is <strong>{pct_diff:.1f}% above</strong> the comp average of ${avg_rent:,.0f}. Consider stress-testing at the lower comp rent.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="info-banner">âš ï¸ Your rent is <strong>{pct_diff:.1f}% above</strong> the comp average of ${avg_rent:,.0f}. Consider stress-testing at the lower comp rent.</div>', unsafe_allow_html=True)
         elif pct_diff < -5:
-            st.markdown(f'<div class="success-banner">✅ Your rent is <strong>{abs(pct_diff):.1f}% below</strong> comp average — potential upside of ${avg_rent - monthly_rent:,.0f}/mo.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="success-banner">âœ… Your rent is <strong>{abs(pct_diff):.1f}% below</strong> comp average — potential upside of ${avg_rent - monthly_rent:,.0f}/mo.</div>', unsafe_allow_html=True)
 
 # ───────────────────────────────
 # TAB: Amortization
@@ -1279,24 +776,10 @@ with tab_amort:
         yearly = yearly.map(lambda x: round(x, 0) if isinstance(x, float) else x)
 
         am1, am2, am3 = st.columns(3)
-        def am_kpi(col, label, val):
-            col.markdown(f"""
-            <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);
-                 border-radius:12px;padding:18px 16px;text-align:center;
-                 position:relative;overflow:hidden;">
-                <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                     background:linear-gradient(90deg,transparent,#d4a84355,transparent)"></div>
-                <div style="font-size:9px;font-family:'Space Mono',monospace;
-                     color:rgba(205,200,230,0.3);text-transform:uppercase;
-                     letter-spacing:0.12em;margin-bottom:8px">{label}</div>
-                <div style="font-family:'Space Mono',monospace;font-size:1.1rem;
-                     color:#d4a843;text-shadow:0 0 16px rgba(212,168,67,0.35)">{val}</div>
-            </div>""", unsafe_allow_html=True)
-
         total_interest = adf["interest"].sum()
-        am_kpi(am1, "Loan Amount",   f"${metrics.loan_amount:,.0f}")
-        am_kpi(am2, "Total Interest",f"${total_interest:,.0f}")
-        am_kpi(am3, "Total Cost",    f"${metrics.loan_amount + total_interest:,.0f}")
+        simple_kpi(am1, "Loan Amount",    fmt_usd(metrics.loan_amount),                      font_size="1.1rem")
+        simple_kpi(am2, "Total Interest", fmt_usd(total_interest),                            font_size="1.1rem")
+        simple_kpi(am3, "Total Cost",     fmt_usd(metrics.loan_amount + total_interest),      font_size="1.1rem")
 
         st.markdown("<br>", unsafe_allow_html=True)
         fig_am = go.Figure()
@@ -1382,13 +865,10 @@ with tab_macro:
     # Rate impact on deal
     st.markdown('<div class="section-title">Rate Sensitivity on This Deal</div>', unsafe_allow_html=True)
     rate_range = [r/100 for r in range(400, 1050, 25)]
-    orig_rate  = inputs.loan_interest_rate
     rate_sens  = []
     for r in rate_range:
-        inputs.loan_interest_rate = r
-        tmp = DealAnalyzer(inputs).analyze()
+        tmp = DealAnalyzer(dc_replace(inputs, loan_interest_rate=r)).analyze()
         rate_sens.append({"rate": r*100, "cf": tmp.monthly_cash_flow, "dscr": tmp.dscr})
-    inputs.loan_interest_rate = orig_rate
 
     fig_rate = go.Figure()
     fig_rate.add_trace(go.Scatter(
@@ -1407,10 +887,10 @@ with tab_macro:
     st.markdown("""
     <div class="info-banner">
         <strong>Reading the macro environment</strong><br>
-        Higher Fed Funds → elevated mortgage rates → lower cash flow.
-        Rising CPI → inflation erodes fixed mortgage costs but raises expenses.
-        Low unemployment → strong rental demand → lower vacancy risk.
-        Rising HPI → property appreciates → stronger BRRRR equity.
+        Higher Fed Funds ↑ elevated mortgage rates ↑ lower cash flow.
+        Rising CPI ↑ inflation erodes fixed mortgage costs but raises expenses.
+        Low unemployment ↑ strong rental demand ↑ lower vacancy risk.
+        Rising HPI ↑ property appreciates ↑ stronger BRRRR equity.
     </div>""", unsafe_allow_html=True)
 
 # ───────────────────────────────
@@ -1469,7 +949,7 @@ with tab_listings:
     _cache_key = f"local_listings_{listing_type}"
     if fetch_btn or _cache_key not in st.session_state:
         if rc_key_listings:
-            spinner_label = "Fetching rental listings…" if listing_type == "Rental" else "Fetching for-sale listings…"
+            spinner_label = "Fetching rental listingsâ€¦" if listing_type == "Rental" else "Fetching for-sale listingsâ€¦"
             with st.spinner(spinner_label):
                 fetcher = ListingsFetcher(
                     rentcast_key=rc_key_listings,
@@ -1546,45 +1026,60 @@ with tab_listings:
                 link_open  = f'<a href="{url}" target="_blank" style="text-decoration:none">' if url else "<div>"
                 link_close = "</a>" if url else "</div>"
 
-                # Build photo carousel — all photos, scroll-snap
+                # Build photo carousel with inline styles (avoids Streamlit sanitizer
+                # stripping JS event handlers and breaking the HTML block)
+                _img_s = (
+                    "min-width:100%;height:200px;object-fit:cover;"
+                    "scroll-snap-align:start;flex-shrink:0;"
+                    "display:block;background:#10102a;"
+                )
+                _reel_s = (
+                    "display:flex;overflow-x:auto;"
+                    "scroll-snap-type:x mandatory;"
+                    "-webkit-overflow-scrolling:touch;"
+                    "scrollbar-width:none;height:200px;"
+                    "border-radius:14px 14px 0 0;"
+                    "position:relative;"
+                )
                 photo_imgs = "".join(
-                    f'<img src="{p}" alt="{addr}" loading="lazy" '
-                    f'onerror="this.style.display=\'none\'">'
+                    f'<img src="{p}" alt="" loading="lazy" style="{_img_s}">'
                     for p in photo_urls
                 )
-                n_photos    = len(photo_urls)
+                n_photos = len(photo_urls)
+                _badge_s = (
+                    "position:absolute;bottom:8px;right:8px;"
+                    "background:rgba(0,0,0,0.62);color:rgba(255,255,255,0.82);"
+                    "font-size:9.5px;font-family:monospace;"
+                    "padding:2px 8px;border-radius:100px;pointer-events:none;"
+                )
                 count_badge = (
-                    f'<div class="photo-count-badge">{n_photos} photo{"s" if n_photos != 1 else ""}</div>'
+                    f'<div style="{_badge_s}">{n_photos} photos</div>'
                     if n_photos > 1 else ""
                 )
 
-                col.markdown(f"""
-{link_open}
+                card_html = f"""{link_open}
 <div class="listing-card">
-    <div class="photo-reel-wrap">
-        <div class="photo-reel">{photo_imgs}</div>
-        {count_badge}
-    </div>
-    <div class="listing-card-body">
-        <div class="{price_cls}">{price_str}</div>
-        <div class="listing-card-addr">{addr}, {city}, {state}</div>
-        {"" if not ptype else f'<div class="listing-card-type">{ptype}</div>'}
-        <div class="listing-card-badges">
-            {"" if beds == "—" else f'<span class="listing-badge">{beds_str}</span>'}
-            {"" if baths == "—" else f'<span class="listing-badge">{baths_str}</span>'}
-            {"" if not sqft_str else f'<span class="listing-badge">{sqft_str}</span>'}
-        </div>
-        <div class="listing-card-meta">{days}d on market</div>
-    </div>
+<div style="{_reel_s}">{photo_imgs}{count_badge}</div>
+<div class="listing-card-body">
+<div class="{price_cls}">{price_str}</div>
+<div class="listing-card-addr">{addr}, {city}, {state}</div>
+{"" if not ptype else f'<div class="listing-card-type">{ptype}</div>'}
+<div class="listing-card-badges">
+{"" if beds == "—" else f'<span class="listing-badge">{beds_str}</span>'}
+{"" if baths == "—" else f'<span class="listing-badge">{baths_str}</span>'}
+{"" if not sqft_str else f'<span class="listing-badge">{sqft_str}</span>'}
 </div>
-{link_close}
-""", unsafe_allow_html=True)
+<div class="listing-card-meta">{days}d on market</div>
+</div>
+</div>
+{link_close}"""
+                col.markdown(card_html, unsafe_allow_html=True)
 
         st.markdown(
             f'<p style="font-size:10.5px;color:rgba(205,200,230,0.25);'
             f'font-family:Space Mono,monospace;margin-top:16px">'
-            f'{len(listings_to_show)} listings · ZIP {listing_zip or zip_code} · '
-            f'{"For Sale" if is_sale_tab else "Rental"} · '
+            f'{len(listings_to_show)} listings Â· ZIP {listing_zip or zip_code} Â· '
+            f'{"For Sale" if is_sale_tab else "Rental"} Â· '
             f'Source: RentCast{"" if rc_key_listings else " (demo)"}</p>',
             unsafe_allow_html=True,
         )
@@ -1597,10 +1092,10 @@ st.markdown("""
      display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(205,200,230,0.25);
           text-transform:uppercase;letter-spacing:0.1em">
-        DealSight · Not financial advice
+        DealSight Â· Not financial advice
     </span>
     <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(205,200,230,0.2)">
-        Data: RentCast · Zillow · FRED · ATTOM · Census · Google Maps
+        Data: RentCast Â· Zillow Â· FRED Â· ATTOM Â· Census Â· Google Maps
     </span>
 </div>
 """, unsafe_allow_html=True)
