@@ -5,7 +5,8 @@ Run: streamlit run streamlit_app/app.py  (from project root)
 """
 
 import sys, os, re
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+_app_dir = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, _app_dir)  # makes python_core importable on Streamlit Cloud
 
 import streamlit as st
 import pandas as pd
