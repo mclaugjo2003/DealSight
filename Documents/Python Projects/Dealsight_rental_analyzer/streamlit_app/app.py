@@ -165,58 +165,56 @@ def show_auth_page() -> None:
 
     # ── Hero ──────────────────────────────────
     with col_hero:
+        _hero_metrics = [
+            ("$412/mo", "Cash Flow"),
+            ("6.8%",    "Cap Rate"),
+            ("1.34×",   "DSCR"),
+            ("9.2%",    "Cash-on-Cash"),
+            ("∞",       "BRRRR CoC"),
+        ]
+        _pills = "".join(
+            f"""<div style="background:#f9fbfa;border:1px solid #e3e9e5;border-radius:12px;
+                 padding:11px 16px;min-width:92px;box-shadow:0 1px 3px rgba(12,40,28,0.05)">
+              <div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:500;
+                   color:#16a34a;line-height:1">{_v}</div>
+              <div style="font-size:10px;color:#51635a;text-transform:uppercase;letter-spacing:0.08em;
+                   margin-top:5px;font-family:'Plus Jakarta Sans',sans-serif">{_l}</div>
+            </div>"""
+            for _v, _l in _hero_metrics
+        )
         st.markdown(f"""
         <div style="padding:20px 0 0">
-          <div style="margin-bottom:40px">
-            <img src="{_logo_b64('logo.png')}" height="72"
+          <div style="margin-bottom:26px">
+            <img src="{_logo_b64('logo.png')}" height="64"
                  style="object-fit:contain;display:block;
                         filter:drop-shadow(0 0 24px rgba(22,163,74,0.55))">
           </div>
 
-          <h1 style="font-family:'Space Grotesk',sans-serif;font-size:40px;font-weight:700;
-               line-height:1.12;color:#0b1410;margin:0 0 18px;letter-spacing:-0.02em">
-            Analyze Any Rental Deal<br>
-            <span style="background:linear-gradient(135deg,#16a34a,#15803d);
+          <div style="display:inline-flex;align-items:center;gap:8px;
+               background:rgba(22,163,74,0.10);border:1px solid rgba(22,163,74,0.20);
+               border-radius:100px;padding:6px 14px;margin-bottom:24px;
+               font-family:'Space Mono',monospace;font-size:11.5px;color:#15803d">
+            <span style="width:6px;height:6px;border-radius:50%;background:#22c55e;
+                 box-shadow:0 0 8px #22c55e"></span>
+            Live data · RentCast · Zillow · FRED · ATTOM · Census
+          </div>
+
+          <h1 style="font-family:'Space Grotesk',sans-serif;font-size:44px;font-weight:700;
+               line-height:1.08;color:#0b1410;margin:0 0 18px;letter-spacing:-0.025em">
+            Stop guessing.<br>
+            <span style="background:linear-gradient(130deg,#16a34a,#22c55e);
                  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                 background-clip:text">in Seconds</span>
+                 background-clip:text">Analyze deals</span><br>
+            in 30 seconds.
           </h1>
 
           <p style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;
-               color:rgba(17,40,30,0.65);line-height:1.65;margin:0 0 36px;max-width:400px">
-            Pro-grade deal analysis for serious real estate investors.
-            Cash flow, cap rate, BRRRR, STR, comps — one dashboard.
+               color:rgba(17,40,30,0.65);line-height:1.65;margin:0 0 30px;max-width:440px">
+            The only rental analyzer that grades every deal A–F — cash flow, cap rate,
+            DSCR, BRRRR, and Airbnb STR with live rent comps, all in one tool.
           </p>
 
-          <div style="display:flex;flex-direction:column;gap:13px">
-            <div style="display:flex;align-items:center;gap:13px">
-              <div style="width:7px;height:7px;border-radius:50%;background:#16a34a;flex-shrink:0;
-                   box-shadow:0 0 8px rgba(22,163,74,0.6)"></div>
-              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
-                Cash-on-Cash, Cap Rate, GRM &amp; DSCR — instant
-              </span>
-            </div>
-            <div style="display:flex;align-items:center;gap:13px">
-              <div style="width:7px;height:7px;border-radius:50%;background:#15803d;flex-shrink:0;
-                   box-shadow:0 0 8px rgba(22,163,74,0.6)"></div>
-              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
-                BRRRR &amp; STR / Airbnb projections
-              </span>
-            </div>
-            <div style="display:flex;align-items:center;gap:13px">
-              <div style="width:7px;height:7px;border-radius:50%;background:#15803d;flex-shrink:0;
-                   box-shadow:0 0 8px rgba(22,163,74,0.5)"></div>
-              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
-                Live rent comps from RentCast &amp; Zillow
-              </span>
-            </div>
-            <div style="display:flex;align-items:center;gap:13px">
-              <div style="width:7px;height:7px;border-radius:50%;background:#16a34a;flex-shrink:0;
-                   box-shadow:0 0 8px rgba(22,163,74,0.5)"></div>
-              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
-                Macro data: FRED rates, vacancy &amp; inflation
-              </span>
-            </div>
-          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px">{_pills}</div>
         </div>
         """, unsafe_allow_html=True)
 
