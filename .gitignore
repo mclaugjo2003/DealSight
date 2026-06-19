@@ -1,0 +1,48 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# SAFETY WHITELIST
+# This git repo (remote: mclaugjo2003/DealSight) is rooted at the home folder
+# C:\Users\mclau. To stop personal files (passwords, API keys, SSH keys, other
+# projects) from ever being committed, ignore EVERYTHING by default and allow
+# only the DealSight project plus the repo-root files Streamlit Cloud deploys.
+# Note: this does not untrack files already committed — only blocks new ones.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 1) Ignore everything at the repo root
+/*
+
+# 2) Re-allow the repo-root files Streamlit Cloud deploys from
+!/.gitignore
+!/requirements.txt
+!/runtime.txt
+
+# 3) Re-allow ONLY the DealSight project (must walk each parent of the path)
+!/Documents
+/Documents/*
+!/Documents/Python Projects
+/Documents/Python Projects/*
+!/Documents/Python Projects/Dealsight_rental_analyzer
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Global ignores (also apply inside the allowed project)
+# ═══════════════════════════════════════════════════════════════════════════
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Environments / deps
+.venv
+node_modules
+
+# Next.js
+.next/
+out/
+
+# Secrets & local env (never commit these)
+.env
+.env.*
+!.env.example
+**/.streamlit/secrets.toml
