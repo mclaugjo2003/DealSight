@@ -1,10 +1,10 @@
-﻿"""
+"""
 DealSight — Rental Property Deal Analyzer
 Slick professional UI with Google Maps integration
 Run: streamlit run streamlit_app/app.py  (from project root)
 """
 
-import sys, os, re
+import sys, os, re, base64
 _app_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, _app_dir)  # makes python_core importable on Streamlit Cloud
 
@@ -18,6 +18,7 @@ import streamlit.components.v1 as components
 from python_core.calculations import PropertyInputs, DealAnalyzer, grade_deal, amortization_schedule
 from python_core.data_sources import RentCastClient, FREDClient
 from python_core.listings import ListingsFetcher, DEMO_LISTINGS
+from python_core.db import sign_in, sign_up, sign_out, is_authenticated, current_user
 from python_core.utils import (
     GOLD, GREEN, RED, BLUE, PURPLE,
     fmt_usd, fmt_pct, fmt_label,
@@ -35,24 +36,277 @@ except Exception:
 # Helpers
 # ─────────────────────────────────────────────
 
+def _logo_b64(filename: str = "logo.png") -> str:
+    """Return a base64 data-URL for a file in streamlit_app/assets/."""
+    _path = os.path.join(os.path.dirname(__file__), "assets", filename)
+    try:
+        with open(_path, "rb") as _f:
+            return "data:image/png;base64," + base64.b64encode(_f.read()).decode()
+    except FileNotFoundError:
+        return ""
+
 def get_secret(key: str, default: str = "") -> str:
     try:
         return st.secrets.get(key, os.getenv(key, default))
     except Exception:
         return os.getenv(key, default)
-    
+
+def logo_url(domain: str, size: int = 32) -> str:
+    """Return a Logo.dev image URL for the given domain."""
+    token = get_secret("LOGO_DEV_TOKEN")
+    base = f"https://img.logo.dev/{domain}?size={size}&format=png"
+    return f"{base}&token={token}" if token else base
+
 def n(val: int | float | None, default: float = 0.0) -> float:
     """Coerce st.number_input output to float, never None."""
     return float(val) if val is not None else default
 
+
+# ─────────────────────────────────────────────
+# Landing / Login page
+# ─────────────────────────────────────────────
+def show_auth_page() -> None:
+    """Render landing + login page, then call st.stop()."""
+    sb_ok = bool(get_secret("SUPABASE_URL") and get_secret("SUPABASE_ANON_KEY"))
+
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none !important; }
+    .block-container { padding: 48px 5% 40px !important; max-width: 100% !important; }
+    .stApp { background: #f4f7f5 !important; }
+
+    /* Auth page background glow */
+    .stApp::before {
+        content: "";
+        position: fixed; inset: 0; z-index: -1; pointer-events: none;
+        background:
+            radial-gradient(ellipse 60% 55% at 15% 55%, rgba(22,163,74,0.10) 0%, transparent 60%),
+            radial-gradient(ellipse 50% 45% at 85% 20%, rgba(34,197,94,0.08) 0%, transparent 55%);
+    }
+
+    /* Auth form styling */
+    div[data-testid="stForm"] {
+        background: #ffffff !important;
+        border: 1px solid rgba(12,40,28,0.10) !important;
+        border-radius: 16px !important;
+        padding: 28px 24px !important;
+        box-shadow: 0 12px 40px rgba(12,40,28,0.08) !important;
+    }
+    div[data-testid="stForm"] .stTextInput input {
+        background: #f4f7f5 !important;
+        border: 1px solid rgba(12,40,28,0.12) !important;
+        border-radius: 8px !important;
+        color: #0b1410 !important;
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        font-size: 14px !important;
+        padding: 10px 14px !important;
+    }
+    div[data-testid="stForm"] .stTextInput input:focus {
+        border-color: #16a34a !important;
+        box-shadow: 0 0 0 2px rgba(22,163,74,0.2) !important;
+    }
+    div[data-testid="stForm"] .stTextInput label { color: rgba(17,40,30,0.66) !important; font-size: 12px !important; }
+    div[data-testid="stFormSubmitButton"] button {
+        background: linear-gradient(135deg, #22c55e 0%, #15803d 100%) !important;
+        color: #fff !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 600 !important;
+        font-size: 14px !important;
+        height: 44px !important;
+        box-shadow: 0 4px 18px rgba(22,163,74,0.32) !important;
+    }
+    div[data-testid="stFormSubmitButton"] button:hover {
+        opacity: 0.92 !important;
+        transform: translateY(-1px) !important;
+    }
+    /* Demo button */
+    .auth-demo-btn button {
+        background: #ffffff !important;
+        border: 1px solid rgba(12,40,28,0.12) !important;
+        border-radius: 8px !important;
+        color: rgba(17,40,30,0.7) !important;
+        font-size: 13px !important;
+    }
+    .auth-demo-btn button:hover {
+        border-color: rgba(22,163,74,0.5) !important;
+        color: #15803d !important;
+    }
+    /* Radio toggle as pill tabs */
+    div[data-testid="stRadio"] > div {
+        gap: 0 !important;
+        background: #eef3f0 !important;
+        border: 1px solid rgba(12,40,28,0.10) !important;
+        border-radius: 8px !important;
+        padding: 3px !important;
+        width: 100% !important;
+    }
+    div[data-testid="stRadio"] label {
+        flex: 1 !important;
+        justify-content: center !important;
+        border-radius: 6px !important;
+        padding: 6px 0 !important;
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-size: 13px !important;
+        font-weight: 500 !important;
+        color: rgba(17,40,30,0.6) !important;
+        transition: all 0.15s !important;
+    }
+    div[data-testid="stRadio"] label[data-checked="true"] {
+        background: rgba(22,163,74,0.16) !important;
+        color: #15803d !important;
+    }
+    div[data-testid="stRadio"] input { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_hero, col_form = st.columns([1.25, 1], gap="large")
+
+    # ── Hero ──────────────────────────────────
+    with col_hero:
+        st.markdown(f"""
+        <div style="padding:20px 0 0">
+          <div style="margin-bottom:40px">
+            <img src="{_logo_b64('logo.png')}" height="72"
+                 style="object-fit:contain;display:block;
+                        filter:drop-shadow(0 0 24px rgba(22,163,74,0.55))">
+          </div>
+
+          <h1 style="font-family:'Space Grotesk',sans-serif;font-size:40px;font-weight:700;
+               line-height:1.12;color:#0b1410;margin:0 0 18px;letter-spacing:-0.02em">
+            Analyze Any Rental Deal<br>
+            <span style="background:linear-gradient(135deg,#16a34a,#15803d);
+                 -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                 background-clip:text">in Seconds</span>
+          </h1>
+
+          <p style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;
+               color:rgba(17,40,30,0.65);line-height:1.65;margin:0 0 36px;max-width:400px">
+            Pro-grade deal analysis for serious real estate investors.
+            Cash flow, cap rate, BRRRR, STR, comps — one dashboard.
+          </p>
+
+          <div style="display:flex;flex-direction:column;gap:13px">
+            <div style="display:flex;align-items:center;gap:13px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#16a34a;flex-shrink:0;
+                   box-shadow:0 0 8px rgba(22,163,74,0.6)"></div>
+              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
+                Cash-on-Cash, Cap Rate, GRM &amp; DSCR — instant
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:13px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#15803d;flex-shrink:0;
+                   box-shadow:0 0 8px rgba(22,163,74,0.6)"></div>
+              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
+                BRRRR &amp; STR / Airbnb projections
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:13px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#15803d;flex-shrink:0;
+                   box-shadow:0 0 8px rgba(22,163,74,0.5)"></div>
+              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
+                Live rent comps from RentCast &amp; Zillow
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:13px">
+              <div style="width:7px;height:7px;border-radius:50%;background:#16a34a;flex-shrink:0;
+                   box-shadow:0 0 8px rgba(22,163,74,0.5)"></div>
+              <span style="color:rgba(17,40,30,0.72);font-size:14px;font-family:'Plus Jakarta Sans',sans-serif">
+                Macro data: FRED rates, vacancy &amp; inflation
+              </span>
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Auth form ─────────────────────────────
+    with col_form:
+        st.markdown("""
+        <div style="padding:20px 0 12px">
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;
+               color:#0b1410;margin-bottom:4px">Get Started Free</div>
+          <div style="font-size:13px;color:rgba(17,40,30,0.45);font-family:'Plus Jakarta Sans',sans-serif;
+               margin-bottom:20px">No credit card required</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        auth_mode = st.radio(
+            "auth_toggle",
+            ["Sign In", "Create Account"],
+            horizontal=True,
+            key="auth_mode_radio",
+            label_visibility="collapsed",
+        )
+
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        auth_feedback = st.empty()
+
+        if sb_ok:
+            with st.form("auth_form_main", clear_on_submit=False):
+                name_in = ""
+                if auth_mode == "Create Account":
+                    name_in = st.text_input("Full Name", placeholder="Jane Smith", key="auth_name_in")
+                email_in = st.text_input("Email Address", placeholder="you@example.com", key="auth_email_in")
+                pass_in  = st.text_input(
+                    "Password", type="password", key="auth_pass_in",
+                    placeholder="Min 8 characters" if auth_mode == "Create Account" else "••••••••",
+                )
+                go = st.form_submit_button(
+                    "Sign In →" if auth_mode == "Sign In" else "Create Free Account →",
+                    use_container_width=True,
+                )
+
+            if go:
+                if auth_mode == "Sign In":
+                    res = sign_in(email_in, pass_in)
+                    if res["error"]:
+                        auth_feedback.error(res["error"])
+                    else:
+                        st.rerun()
+                else:
+                    res = sign_up(email_in, pass_in, name_in)
+                    if res["error"]:
+                        auth_feedback.error(res["error"])
+                    else:
+                        auth_feedback.success("Account created! Check your email to confirm, then sign in.")
+        else:
+            st.info("Supabase not configured — use Demo mode to explore the app.")
+
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="auth-demo-btn">', unsafe_allow_html=True)
+        if st.button("Try Demo — No Account Needed →", use_container_width=True, key="btn_demo_mode"):
+            st.session_state["demo_mode"] = True
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(12,40,28,0.08);
+             font-size:11.5px;color:rgba(17,40,30,0.3);font-family:'Space Mono',monospace;
+             text-align:center;line-height:1.6">
+          Free: 3 analyses &nbsp;·&nbsp; Pro $29/mo: 100 analyses + live data<br>
+          Team $79/mo: unlimited
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.stop()
+
 # ─────────────────────────────────────────────
 # Page Config
 # ─────────────────────────────────────────────
+_favicon_path = os.path.join(os.path.dirname(__file__), 'assets', 'favicon.png')
+try:
+    from PIL import Image as _PILImage
+    _favicon = _PILImage.open(_favicon_path)
+except Exception:
+    _favicon = '💎'
+
 st.set_page_config(
-    page_title="DealSight - Deal Analyzer",
-    page_icon="ðŸ ",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    page_title='DealSight - Deal Analyzer',
+    page_icon=_favicon,
+    layout='wide',
+    initial_sidebar_state='expanded',
 )
 
 # ─────────────────────────────────────────────
@@ -84,23 +338,54 @@ for _wk, _pk in [("sb_address", "_pending_sb_address"),
         st.session_state[_wk] = st.session_state.pop(_pk)
 
 # ─────────────────────────────────────────────
+# Auth gate — show landing page if not signed in
+# (demo_mode bypasses auth for anonymous usage)
+# ─────────────────────────────────────────────
+if not is_authenticated() and not st.session_state.get("demo_mode"):
+    show_auth_page()  # calls st.stop() internally
+
+# ─────────────────────────────────────────────
 # Sidebar — Inputs
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("""
-    <div style="padding:20px 0 16px;display:flex;align-items:center;gap:10px;
-         border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:8px">
-        <div style="width:28px;height:28px;border-radius:7px;flex-shrink:0;
-             background:linear-gradient(135deg,#4f72ff 0%,#8b5cf6 100%);
-             display:flex;align-items:center;justify-content:center;font-size:14px;
-             box-shadow:0 0 14px rgba(79,114,255,0.4)">ðŸ </div>
-        <span style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:700;
-              letter-spacing:-0.01em;
-              background:linear-gradient(135deg,#ffffff,#d4a843);
+    st.markdown(f"""
+    <div style="padding:16px 0 14px;display:flex;align-items:center;gap:11px;
+         border-bottom:1px solid rgba(12,40,28,0.10);margin-bottom:8px">
+        <img src="{_logo_b64('icon.png')}" width="54" height="54"
+             style="object-fit:contain;flex-shrink:0;
+                    filter:drop-shadow(0 2px 8px rgba(22,163,74,0.35))">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;
+              letter-spacing:-0.02em;
+              background:linear-gradient(135deg,#0b1410,#16a34a);
               -webkit-background-clip:text;-webkit-text-fill-color:transparent;
               background-clip:text">DealSight</span>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── User / session pill ───────────────────
+    _user = current_user()
+    if _user:
+        _email = getattr(_user, "email", "") or ""
+        st.markdown(
+            f'<div style="font-size:11px;color:rgba(17,40,30,0.4);'
+            f'font-family:Space Mono,monospace;padding:0 4px 8px;'
+            f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+            f'● {_email}</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign Out", key="btn_sign_out", use_container_width=True):
+            sign_out()
+            st.session_state.pop("demo_mode", None)
+            st.rerun()
+    elif st.session_state.get("demo_mode"):
+        st.markdown(
+            '<div style="font-size:11px;color:rgba(22,163,74,0.7);'
+            'font-family:Space Mono,monospace;padding:0 4px 4px">◆ Demo mode</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign In / Create Account", key="btn_go_login", use_container_width=True):
+            st.session_state.pop("demo_mode", None)
+            st.rerun()
 
     st.markdown('<div class="sidebar-section">Property</div>', unsafe_allow_html=True)
     address: str  = st.text_input("Street Address", key="sb_address",  label_visibility="collapsed", placeholder="Street address")
@@ -206,10 +491,11 @@ cf_color = "cf-pos" if metrics.monthly_cash_flow > 0 else ("cf-neg" if metrics.m
 st.markdown(f"""
 <div class="topbar">
     <div class="topbar-logo">
-        <div class="logo-box" style="width:38px;height:38px;font-size:18px;border-radius:10px;">ðŸ </div>
-        DealSight
+        <img src="{_logo_b64('logo.png')}" height="60"
+             style="object-fit:contain;display:block;
+                    filter:drop-shadow(0 0 18px rgba(34,197,94,0.55))">
     </div>
-    <div class="topbar-address" style="color:{'#e8e6f4' if address != '123 Main St' else 'rgba(180,185,255,0.55)'};
+    <div class="topbar-address" style="color:{'#eafff4' if address != '123 Main St' else 'rgba(210,240,225,0.6)'};
          {'font-weight:500;' if address != '123 Main St' else ''}">
         {'🔍 ' if address == '123 Main St' else ''}{full_address if address != "123 Main St" else "Enter an address below ↑"}
     </div>
@@ -268,12 +554,12 @@ with map_col:
         # Google Maps Embed — shows map + street view toggle
         map_html = f"""
         <div style="position:relative;border-radius:12px;overflow:hidden;
-             border:1px solid rgba(255,255,255,0.07);height:340px;">
+             border:1px solid rgba(12,40,28,0.10);height:340px;">
             <div style="position:absolute;top:12px;left:12px;z-index:10;
                  background:rgba(5,5,17,0.88);backdrop-filter:blur(10px);
-                 border:1px solid rgba(79,114,255,0.3);border-radius:6px;
+                 border:1px solid rgba(22,163,74,0.3);border-radius:6px;
                  padding:5px 10px;font-size:10px;font-family:monospace;
-                 color:#d4a843;text-transform:uppercase;letter-spacing:0.1em;">
+                 color:#15803d;text-transform:uppercase;letter-spacing:0.1em;">
                 Google Maps
             </div>
             <iframe
@@ -288,9 +574,9 @@ with map_col:
         components.html(map_html, height=350)
 
         # Street View
-        with st.expander("ðŸ  Street View"):
+        with st.expander("📸 Street View"):
             sv_html = f"""
-            <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);">
+            <div style="border-radius:10px;overflow:hidden;border:1px solid rgba(12,40,28,0.10);">
                 <iframe
                     width="100%" height="260"
                     frameborder="0" style="border:0;display:block;"
@@ -302,12 +588,12 @@ with map_col:
             components.html(sv_html, height=270)
     else:
         osm_clean = f"""
-        <div style="border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);height:340px;position:relative;">
+        <div style="border-radius:12px;overflow:hidden;border:1px solid rgba(12,40,28,0.10);height:340px;position:relative;">
             <div style="position:absolute;top:12px;left:12px;z-index:10;
                  background:rgba(5,5,17,0.92);backdrop-filter:blur(10px);
-                 border:1px solid rgba(79,114,255,0.3);border-radius:6px;
+                 border:1px solid rgba(22,163,74,0.3);border-radius:6px;
                  padding:5px 10px;font-size:10px;font-family:monospace;
-                 color:#d4a843;text-transform:uppercase;letter-spacing:0.1em;">
+                 color:#15803d;text-transform:uppercase;letter-spacing:0.1em;">
                 Map Preview
             </div>
             <iframe
@@ -318,7 +604,7 @@ with map_col:
             </iframe>
         </div>
         <div style="text-align:center;padding:6px 0;font-size:10px;
-             color:rgba(205,200,230,0.25);font-family:monospace;">
+             color:rgba(17,40,30,0.25);font-family:monospace;">
             Add GOOGLE_MAPS_API_KEY to secrets.toml for the full Google Maps + Street View experience
         </div>
         """
@@ -412,9 +698,9 @@ with _kpi_ctl_col:
     )
 
 kpi_strip_html = f"""
-<div style="display:flex;background:rgba(255,255,255,0.03);
-     border-top:1px solid rgba(255,255,255,0.06);
-     border-bottom:1px solid rgba(255,255,255,0.06);">
+<div style="display:flex;background:rgba(17,40,30,0.04);
+     border-top:1px solid rgba(12,40,28,0.08);
+     border-bottom:1px solid rgba(12,40,28,0.08);">
     {kpi_card("Monthly Cash Flow", cf_fmt,   g["cash_flow"][0], g["cash_flow"][1], f"{fmt_usd(metrics.annual_cash_flow)}/yr")}
     {kpi_card("Cap Rate",          cap_fmt,  g["cap_rate"][0],  g["cap_rate"][1],  "NOI / price")}
     {kpi_card("Cash-on-Cash",      coc_fmt,  g["coc"][0],       g["coc"][1],       f"on {fmt_usd(metrics.total_cash_invested)}")}
@@ -449,34 +735,34 @@ with tab_cf:
             orientation="v", measure=measures, x=labels, y=values,
             text=[f"${abs(v):,.0f}" for v in values], textposition="outside",
             textfont=dict(family="Space Mono, monospace", size=10),
-            connector=dict(line=dict(color="rgba(255,255,255,0.08)")),
+            connector=dict(line=dict(color="rgba(17,40,30,0.18)")),
             decreasing=dict(marker=dict(color=RED,   line=dict(width=0))),
             increasing=dict(marker=dict(color=GREEN, line=dict(width=0))),
             totals=dict(    marker=dict(color=GOLD,  line=dict(width=0))),
         ))
         apply_theme(fig, height=380,
-        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickangle=-20, tickfont=dict(size=10)))
+        xaxis=dict(gridcolor="rgba(17,40,30,0.08)", tickangle=-20, tickfont=dict(size=10)))
         st.plotly_chart(fig, use_container_width=True, key="chart_waterfall")
         
     with col_exp:
         st.markdown('<div class="section-title">Expense Breakdown</div>', unsafe_allow_html=True)
         exp_labels = [fmt_label(k) for k in bd]
         exp_vals   = list(bd.values())
-        colors_pie = ["#e86e4a", "#60a5fa", "#a78bfa", "#34d399", "#fb923c", "#f472b6", "#94a3b8"]
+        colors_pie = ["#16a34a", "#22c55e", "#15803d", "#4ade80", "#0f766e", "#84cc16", "#94a3b8"]
 
         fig2 = go.Figure(go.Pie(
             labels=exp_labels, values=exp_vals, hole=0.58,
             textinfo="percent", textfont=dict(family="Space Mono, monospace", size=10),
             marker=dict(colors=colors_pie[:len(exp_vals)],
-                        line=dict(color="#050511", width=2)),
+                        line=dict(color="#ffffff", width=2)),
         ))
         fig2.add_annotation(
             text=f"${sum(exp_vals):,.0f}<br><span style='font-size:10px'>per month</span>",
-            font=dict(size=15, color="#e8e6f4", family="Space Mono, monospace"),
+            font=dict(size=15, color="#0b1410", family="Space Mono, monospace"),
             showarrow=False,
         )
         apply_theme(fig2, height=380,
-        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickangle=-20, tickfont=dict(size=10)))
+        xaxis=dict(gridcolor="rgba(17,40,30,0.08)", tickangle=-20, tickfont=dict(size=10)))
         st.plotly_chart(fig2, use_container_width=True, key="chart_expense_donut")
 
     # Itemized expense table
@@ -503,7 +789,7 @@ with tab_cf:
                 <span class="er-value">(${v:,.0f}/mo)</span>
             </div>""", unsafe_allow_html=True)
         st.markdown(f"""
-        <div class="expense-row" style="margin-top:8px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);">
+        <div class="expense-row" style="margin-top:8px;padding-top:12px;border-top:1px solid rgba(12,40,28,0.12);">
             <span class="er-label" style="color:#e8e6e0;font-weight:500">Total / month</span>
             <span class="er-value">(${metrics.total_monthly_expenses:,.0f})</span>
         </div>""", unsafe_allow_html=True)
@@ -539,11 +825,11 @@ with tab_cf:
     fig3.add_trace(go.Scatter(x=years, y=vals, name="Property Value",
                                line=dict(color=BLUE, width=2, dash="dot"), yaxis="y2"))
     apply_theme(fig3, height=360,
-    yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Cash Flow ($)", tickprefix="$"),
+    yaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="Cash Flow ($)", tickprefix="$"),
     yaxis2=dict(title="Value ($)", overlaying="y", side="right",
                 gridcolor="rgba(0,0,0,0)", tickprefix="$",
                 tickfont=dict(family="Space Mono, monospace", size=10)),
-    xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Year", dtick=1),
+    xaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="Year", dtick=1),
     legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig3, use_container_width=True, key="chart_projection")
 
@@ -637,7 +923,7 @@ with tab_str:
         y=[metrics.str_monthly_revenue, max(metrics.str_monthly_cash_flow,0), max(metrics.str_monthly_cash_flow*12,0)],
         marker_color=GOLD, marker_line=dict(width=0)))
     apply_theme(fig_comp, height=300, barmode="group",
-    yaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickprefix="$"))
+    yaxis=dict(gridcolor="rgba(17,40,30,0.08)", tickprefix="$"))
     st.plotly_chart(fig_comp, use_container_width=True, key="chart_str_comparison")
 
     # Occupancy sensitivity
@@ -657,8 +943,8 @@ with tab_str:
     fig_s.add_vline(x=str_occ*100, line_dash="dot", line_color=GOLD, opacity=0.5,
             annotation_text=f"Current {str_occ*100:.0f}%", annotation_font_color=GOLD)
     apply_theme(fig_s, height=320,
-        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Occupancy (%)", ticksuffix="%"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="$/month",        tickprefix="$"))
+        xaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="Occupancy (%)", ticksuffix="%"),
+        yaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="$/month",        tickprefix="$"))
     st.plotly_chart(fig_s, use_container_width=True, key="chart_str_sensitivity")
 
 # ───────────────────────────────
@@ -667,7 +953,15 @@ with tab_str:
 with tab_comps:
     cc1, cc2 = st.columns([3, 1], gap="large")
     with cc1:
-        st.markdown('<div class="section-title">Rent Comparables</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="section-title" style="display:inline-flex;align-items:center;gap:8px">'
+            f'Rent Comparables'
+            f'<img src="{logo_url("rentcast.io", 24)}" width="18" height="18"'
+            f'     style="border-radius:4px;opacity:.65;object-fit:contain"'
+            f'     onerror="this.style.display=\'none\'">'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
     with cc2:
         comp_beds = st.number_input("Beds filter", value=3, min_value=1, max_value=6, step=1)
 
@@ -710,8 +1004,8 @@ with tab_comps:
 
     # Custom comps table
     st.markdown("""
-    <div style="background:#0b0b1e;border:1px solid rgba(255,255,255,0.07);border-radius:14px;
-         overflow:hidden;margin-top:8px">
+    <div style="background:#ffffff;border:1px solid rgba(12,40,28,0.10);border-radius:14px;
+         overflow:hidden;margin-top:8px;box-shadow:0 1px 3px rgba(12,40,28,0.05)">
         <div class="comp-row comp-header">
             <span>Address</span><span>Rent/mo</span><span>Bed/Bath</span>
             <span>Sq Ft</span><span>Days on Market</span>
@@ -751,8 +1045,8 @@ with tab_comps:
                           annotation_text=f"Avg comp  ${avg_rent:,.0f}",
                           annotation_font_color=GOLD, annotation_position="bottom right")
         apply_theme(fig_rc, height=300,
-        xaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickangle=-20),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.04)", tickprefix="$"))
+        xaxis=dict(gridcolor="rgba(17,40,30,0.08)", tickangle=-20),
+        yaxis=dict(gridcolor="rgba(17,40,30,0.08)", tickprefix="$"))
         st.plotly_chart(fig_rc, use_container_width=True, key="chart_rent_comps")
 
         pct_diff = ((monthly_rent - avg_rent) / avg_rent) * 100
@@ -792,8 +1086,8 @@ with tab_amort:
             name="Balance", line=dict(color=GOLD, width=2),
             mode="lines+markers", marker=dict(size=4), yaxis="y2"))
         apply_theme(fig_am, height=380, barmode="stack",
-    xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Year", dtick=5),
-    yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="$/Year", tickprefix="$"),
+    xaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="Year", dtick=5),
+    yaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="$/Year", tickprefix="$"),
     yaxis2=dict(title="Balance", overlaying="y", side="right",
                 gridcolor="rgba(0,0,0,0)", tickprefix="$",
                 tickfont=dict(family="Space Mono, monospace", size=10)))
@@ -875,14 +1169,14 @@ with tab_macro:
     fig_rate.add_trace(go.Scatter(
         x=[s["rate"] for s in rate_sens], y=[s["cf"] for s in rate_sens],
         name="Monthly CF", line=dict(color=GOLD, width=2), fill="tozeroy",
-        fillcolor="rgba(79,114,255,0.06)"))
+        fillcolor="rgba(22,163,74,0.06)"))
     fig_rate.add_hline(y=0, line_dash="dash", line_color=RED, opacity=0.5)
     fig_rate.add_vline(x=interest_rate*100, line_dash="dot", line_color=BLUE, opacity=0.6,
         annotation_text=f"Your rate {interest_rate*100:.2f}%",
         annotation_font_color=BLUE)
     apply_theme(fig_rate, height=320,
-    xaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Interest Rate (%)", ticksuffix="%"),
-    yaxis=dict(gridcolor="rgba(255,255,255,0.04)", title="Monthly CF ($)",    tickprefix="$"))
+    xaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="Interest Rate (%)", ticksuffix="%"),
+    yaxis=dict(gridcolor="rgba(17,40,30,0.08)", title="Monthly CF ($)",    tickprefix="$"))
     st.plotly_chart(fig_rate, use_container_width=True, key="chart_rate_sensitivity")
 
     st.markdown("""
@@ -900,7 +1194,7 @@ with tab_macro:
 with tab_listings:
     st.markdown('<div class="section-title">Listings Near This Property</div>', unsafe_allow_html=True)
     st.markdown(
-        '<p style="font-size:12.5px;color:rgba(205,200,230,0.45);margin-bottom:16px">'
+        '<p style="font-size:12.5px;color:rgba(17,40,30,0.45);margin-bottom:16px">'
         'Active rental and for-sale listings in the same area — powered by RentCast. '
         'Scroll photos left/right inside each card to browse all listing images.</p>',
         unsafe_allow_html=True,
@@ -1032,7 +1326,7 @@ with tab_listings:
                 _img_s = (
                     "min-width:100%;height:200px;object-fit:cover;"
                     "scroll-snap-align:start;flex-shrink:0;"
-                    "display:block;background:#10102a;"
+                    "display:block;background:#eef3f0;"
                 )
                 _reel_s = (
                     "display:flex;overflow-x:auto;"
@@ -1077,26 +1371,58 @@ with tab_listings:
                 col.markdown(card_html, unsafe_allow_html=True)
 
         st.markdown(
-            f'<p style="font-size:10.5px;color:rgba(205,200,230,0.25);'
-            f'font-family:Space Mono,monospace;margin-top:16px">'
-            f'{len(listings_to_show)} listings Â· ZIP {listing_zip or zip_code} Â· '
-            f'{"For Sale" if is_sale_tab else "Rental"} Â· '
-            f'Source: RentCast{"" if rc_key_listings else " (demo)"}</p>',
+            f'<div style="display:flex;align-items:center;gap:6px;margin-top:14px">'
+            f'<span style="font-size:10.5px;color:rgba(17,40,30,0.25);'
+            f'font-family:Space Mono,monospace">'
+            f'{len(listings_to_show)} listings · ZIP {listing_zip or zip_code} · '
+            f'{"For Sale" if is_sale_tab else "Rental"} · via</span>'
+            f'<img src="{logo_url("rentcast.io", 24)}" width="14" height="14"'
+            f'     style="border-radius:3px;opacity:.5;object-fit:contain"'
+            f'     onerror="this.style.display=\'none\'">'
+            f'<span style="font-size:10.5px;color:rgba(17,40,30,0.25);'
+            f'font-family:Space Mono,monospace">'
+            f'RentCast{"" if rc_key_listings else " (demo)"}</span>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
 # ─────────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────────
-st.markdown("""
-<div style="margin-top:48px;padding:20px 36px;border-top:1px solid rgba(255,255,255,0.05);
-     display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-    <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(205,200,230,0.25);
+_data_sources = [
+    ("rentcast.io",           "RentCast"),
+    ("zillow.com",            "Zillow"),
+    ("fred.stlouisfed.org",   "FRED"),
+    ("attomdata.com",         "ATTOM"),
+    ("census.gov",            "Census"),
+    ("google.com",            "Google Maps"),
+]
+_logo_chips = "".join(
+    f"""<a href="https://{domain}" target="_blank" rel="noopener"
+          style="display:inline-flex;align-items:center;gap:5px;
+                 padding:4px 9px 4px 6px;border-radius:100px;
+                 background:rgba(17,40,30,0.04);
+                 border:1px solid rgba(12,40,28,0.10);
+                 text-decoration:none;transition:border-color .15s">
+         <img src="{logo_url(domain, 20)}" width="16" height="16"
+              style="border-radius:3px;object-fit:contain;opacity:.75"
+              onerror="this.style.display='none'">
+         <span style="font-family:'Space Mono',monospace;font-size:9.5px;
+               color:rgba(17,40,30,0.3)">{label}</span>
+       </a>"""
+    for domain, label in _data_sources
+)
+st.markdown(f"""
+<div style="margin-top:48px;padding:18px 36px;border-top:1px solid rgba(12,40,28,0.08);
+     display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(17,40,30,0.25);
           text-transform:uppercase;letter-spacing:0.1em">
-        DealSight Â· Not financial advice
+        DealSight · Not financial advice
     </span>
-    <span style="font-family:'Space Mono',monospace;font-size:10px;color:rgba(205,200,230,0.2)">
-        Data: RentCast Â· Zillow Â· FRED Â· ATTOM Â· Census Â· Google Maps
-    </span>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-family:'Space Mono',monospace;font-size:9px;
+              color:rgba(17,40,30,0.18);margin-right:2px">Powered by</span>
+        {_logo_chips}
+    </div>
 </div>
 """, unsafe_allow_html=True)
